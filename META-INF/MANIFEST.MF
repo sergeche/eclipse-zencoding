@@ -6,7 +6,8 @@ Bundle-Version: 1.0.0
 Bundle-Activator: ru.zencoding.eclipse.Activator
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
- org.eclipse.ui.editors;bundle-version="3.6.0"
+ org.eclipse.ui.editors;bundle-version="3.6.0",
+ org.eclipse.jface.text;bundle-version="3.6.1"
 Bundle-ActivationPolicy: lazy
 Bundle-RequiredExecutionEnvironment: JavaSE-1.6
 Bundle-ClassPath: src/js.jar,

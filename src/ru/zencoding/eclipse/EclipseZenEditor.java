@@ -1,8 +1,7 @@
 package ru.zencoding.eclipse;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Enumeration;
-import java.util.Hashtable;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -13,16 +12,24 @@ import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
+import org.eclipse.jface.text.ITextViewer;
+import org.eclipse.jface.text.link.LinkedModeModel;
+import org.eclipse.jface.text.link.LinkedModeUI;
+import org.eclipse.jface.text.link.LinkedPosition;
+import org.eclipse.jface.text.link.LinkedPositionGroup;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.editors.text.TextEditor;
+import org.eclipse.ui.texteditor.AbstractTextEditor;
 import org.eclipse.ui.texteditor.IDocumentProvider;
 
 import ru.zencoding.IZenEditor;
 import ru.zencoding.SelectionData;
+import ru.zencoding.TabStop;
+import ru.zencoding.TabStopGroup;
 import ru.zencoding.TabStopStructure;
 
 public class EclipseZenEditor implements IZenEditor {
@@ -104,32 +111,65 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public void replaceContent(String value, int start, int end) {
-		String content = getContent();
-		int caretPos = getCaretPos();
-		String placeholder = getCaretPlaceholder();
-		
 		String newValue = padString(value, getStringPadding(getCurrentLine()));
 		TabStopStructure tabStops = handleTabStops(newValue);
-		
-		// use processed text without tabstop placeholders
 		newValue = tabStops.getText();
 		
 		try {
 			doc.replace(start, end - start, newValue);
 			
-			// sort tabstops
-			String[] tabStopKeys = tabStops.getSortedGroupKeys();
-			int totalTabStops = tabStops.getTabStopsCount();
-			if (totalTabStops > 1 || (totalTabStops == 1 && tabStops.getTabStop(tabStopKeys[0], 0).isZeroWidth()) ) {
-				// add links
+			int totalLinks = tabStops.getTabStopsCount();
+			String[] tabGroups = tabStops.getSortedGroupKeys();
+			
+			if (totalLinks < 1) {
+				tabStops.addTabStopToGroup("carets", newValue.length(), newValue.length());
 			}
 			
+			TabStop firstTabStop = tabStops.getTabStop(tabGroups[0], 0);
 			
-		} catch (BadLocationException e) {
-			// TODO Auto-generated catch block
+			if (totalLinks > 1 || firstTabStop.getStart() != firstTabStop.getEnd()) {
+				ITextViewer viewer = getTextViewer();
+				LinkedModeModel model = new LinkedModeModel();
+				
+				for (int i = 0; i < tabGroups.length; i++) {
+					TabStopGroup tabGroup = tabStops.getTabStopGroup(tabGroups[i]);
+					LinkedPositionGroup group = null;
+					
+					if (tabGroups[i].equals("carets")) {
+						for (int j = 0; j < tabGroup.getTabStopList().size(); j++) {
+							TabStop ts = tabGroup.getTabStopList().get(j);
+							group = new LinkedPositionGroup();
+							group.addPosition(new LinkedPosition(doc, start + ts.getStart(), ts.getLength()));
+							model.addGroup(group);
+						}
+					} else {
+						group = new LinkedPositionGroup();
+						
+						for (int j = 0; j < tabGroup.getTabStopList().size(); j++) {
+							TabStop ts = tabGroup.getTabStopList().get(j);
+							group.addPosition(new LinkedPosition(doc, start + ts.getStart(), ts.getLength()));
+						}
+						
+						model.addGroup(group);
+					}
+				}
+				
+				model.forceInstall();
+				
+				LinkedModeUI linkUI = new LinkedModeUI(model, viewer);
+				linkUI.enter();
+			} else {
+				setCaretPos(start + firstTabStop.getStart());
+			}
+		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		
+	}
+	
+	private ITextViewer getTextViewer() throws Exception {
+		Field svField = AbstractTextEditor.class.getDeclaredField("fSourceViewer");
+		svField.setAccessible(true);
+		return (ITextViewer) svField.get((AbstractTextEditor) editor);
 	}
 	
 	private String findTabStopLabels(String text, Properties tabStopLabels) {
@@ -234,7 +274,7 @@ public class EclipseZenEditor implements IZenEditor {
 		
 		// add carets
 		for (Integer caretPos : carets) {
-			tabStops.addTabStopToGroup("carets", caretPos, caretPos);
+			tabStops.addTabStopToGroup("carets", (int) caretPos, (int) caretPos);
 		}
 		
 		return tabStops;
@@ -374,6 +414,10 @@ public class EclipseZenEditor implements IZenEditor {
 
 	public String getCaretPlaceholder() {
 		return caretPlaceholder;
+	}
+	
+	public void print(String msg) {
+		System.out.println("ZC: " + msg);
 	}
 
 }

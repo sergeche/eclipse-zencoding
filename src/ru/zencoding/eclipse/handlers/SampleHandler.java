@@ -3,9 +3,13 @@ package ru.zencoding.eclipse.handlers;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.ui.IWorkbenchWindow;
-import org.eclipse.ui.handlers.HandlerUtil;
-import org.eclipse.jface.dialogs.MessageDialog;
+import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.editors.text.TextEditor;
+import org.eclipse.ui.texteditor.ITextEditor;
+
+import ru.zencoding.JSExecutor;
+import ru.zencoding.eclipse.EclipseZenEditor;
 
 /**
  * Our sample handler extends AbstractHandler, an IHandler base class.
@@ -24,11 +28,15 @@ public class SampleHandler extends AbstractHandler {
 	 * from the application context.
 	 */
 	public Object execute(ExecutionEvent event) throws ExecutionException {
-		IWorkbenchWindow window = HandlerUtil.getActiveWorkbenchWindowChecked(event);
-		MessageDialog.openInformation(
-				window.getShell(),
-				"Zen Coding for Eclipse",
-				"Hello, Eclipse world");
+		IEditorPart editor =  PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
+		if (editor instanceof ITextEditor) {
+			EclipseZenEditor zenEditor = new EclipseZenEditor((TextEditor) editor);
+			JSExecutor js = JSExecutor.getSingleton();
+			
+			System.out.println("Running expand_abbreviation");
+			js.runAction(zenEditor, "expand_abbreviation");
+		}
+		
 		return null;
 	}
 }
