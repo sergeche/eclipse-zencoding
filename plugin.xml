@@ -72,9 +72,9 @@
           name="Zen Coding">
     </page>
     <page
-          class="ru.zencoding.eclipse.preferences.ZenCodingTemplatesPreferencesPage"
-          id="ru.zencoding.eclipse.preferences.ZenCodingTemplatesPreferencesPage"
-          name="Templates"
+          class="ru.zencoding.eclipse.preferences.ZenCodingAbbreviationsPreferencesPage"
+          id="ru.zencoding.eclipse.preferences.ZenCodingAbbreviationsPreferencesPage"
+          name="Abbreviations"
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
  </extension>

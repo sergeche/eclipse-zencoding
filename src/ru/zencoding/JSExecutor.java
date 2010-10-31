@@ -5,9 +5,13 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 
+import org.eclipse.jface.text.templates.Template;
+import org.eclipse.jface.text.templates.persistence.TemplateStore;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
+
+import ru.zencoding.eclipse.preferences.TemplateHelper;
 
 public class JSExecutor {
 	private volatile static JSExecutor singleton;
@@ -32,6 +36,8 @@ public class JSExecutor {
 		} else {
 			System.err.println("Can't get reader");
 		}
+		
+		reloadUserSettings();
 	}
 
 	public static JSExecutor getSingleton() {
@@ -82,5 +88,29 @@ public class JSExecutor {
 		}
 		
 		return false;
+	}
+	
+	public void reloadUserSettings() {
+		if (isInited()) {
+			Object resetObj = scope.get("resetUserSettings", scope);
+			Object addResourceObj = scope.get("addUserResource", scope);
+			
+			if (resetObj instanceof Function && addResourceObj instanceof Function) {
+				((Function) resetObj).call(cx, scope, scope, null);
+				TemplateStore storage = TemplateHelper.getTemplateStore();
+				Template[] templates = storage.getTemplates();
+				
+				Function addResourceFn = (Function) addResourceObj;
+				
+				for (Template template : templates) {
+					String ctxId = template.getContextTypeId();
+					String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
+					Object fnArgs[] = {syntax, "abbreviations", template.getName(), template.getPattern()};
+					addResourceFn.call(cx, scope, scope, fnArgs);
+				}
+			} else {
+				System.err.println("some of the objects are not functions");
+			}
+		}
 	}
 }

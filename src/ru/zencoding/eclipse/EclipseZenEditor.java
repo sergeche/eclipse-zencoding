@@ -139,6 +139,7 @@ public class EclipseZenEditor implements IZenEditor {
 				tabStops.addTabStopToGroup("carets", newValue.length(), newValue.length());
 			}
 			
+			// FIXME java.lang.ArrayIndexOutOfBoundsException
 			TabStop firstTabStop = tabStops.getTabStop(tabGroups[0], 0);
 			
 			if (totalLinks > 1 || firstTabStop.getStart() != firstTabStop.getEnd()) {

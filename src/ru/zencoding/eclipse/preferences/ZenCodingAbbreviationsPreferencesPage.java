@@ -3,16 +3,17 @@ package ru.zencoding.eclipse.preferences;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 import org.eclipse.ui.texteditor.templates.TemplatePreferencePage;
 
+import ru.zencoding.JSExecutor;
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 
-public class ZenCodingTemplatesPreferencesPage extends TemplatePreferencePage implements
+public class ZenCodingAbbreviationsPreferencesPage extends TemplatePreferencePage implements
 		IWorkbenchPreferencePage {
 	
-	public ZenCodingTemplatesPreferencesPage() {
+	public ZenCodingAbbreviationsPreferencesPage() {
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
         setTemplateStore(TemplateHelper.getTemplateStore());
         setContextTypeRegistry(TemplateHelper.getContextTypeRegistry());
-        setDescription("Templates for Zen Coding");
+        setDescription("Abbreviations for Zen Coding");
 	}
 
 	@Override
@@ -22,9 +23,8 @@ public class ZenCodingTemplatesPreferencesPage extends TemplatePreferencePage im
 
 	@Override
 	public boolean performOk() {
-		// TODO Auto-generated method stub
+		// TODO if JSExecutor is not created yet, don't reload settings
+		JSExecutor.getSingleton().reloadUserSettings();
 		return super.performOk();
 	}
-	
-	
 }
