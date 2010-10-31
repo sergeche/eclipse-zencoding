@@ -41,7 +41,21 @@ public class EclipseZenEditor implements IZenEditor {
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
 	private static Pattern reTabStops = Pattern.compile("\\$(\\d+)|\\$\\{(\\d+)(\\:[^\\}]+)?\\}");
 	
+	public EclipseZenEditor() {
+		
+	}
+	
 	public EclipseZenEditor(TextEditor editor) {
+		setContext(editor);
+	}
+	
+	public static ITextViewer getTextViewer(TextEditor editor) throws Exception {
+		Field svField = AbstractTextEditor.class.getDeclaredField("fSourceViewer");
+		svField.setAccessible(true);
+		return (ITextViewer) svField.get((AbstractTextEditor) editor);
+	}
+	
+	public void setContext(TextEditor editor) {
 		this.editor = editor;
 		IDocumentProvider dp = editor.getDocumentProvider();
 		doc = (Document) dp.getDocument(editor.getEditorInput());
@@ -166,10 +180,8 @@ public class EclipseZenEditor implements IZenEditor {
 		}
 	}
 	
-	private ITextViewer getTextViewer() throws Exception {
-		Field svField = AbstractTextEditor.class.getDeclaredField("fSourceViewer");
-		svField.setAccessible(true);
-		return (ITextViewer) svField.get((AbstractTextEditor) editor);
+	public ITextViewer getTextViewer() throws Exception {
+		return getTextViewer(editor);
 	}
 	
 	private String findTabStopLabels(String text, Properties tabStopLabels) {

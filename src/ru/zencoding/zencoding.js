@@ -4139,4 +4139,4 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 	}
 	
 	zen_coding.registerFilter('xsl', process);
-})();function runZenCodingAction(editor, action_name){ zen_coding.runAction(action_name, editor); }
+})();function runZenCodingAction(editor, action_name){ return zen_coding.runAction(action_name, editor); }

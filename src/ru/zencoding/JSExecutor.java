@@ -23,7 +23,6 @@ public class JSExecutor {
 		scope = cx.initStandardObjects();
 		Reader input = getJSInput();
 		if (input != null) {
-			System.out.println("Got reader " + input.toString());
 			try {
 				cx.evaluateReader(scope, input, getFilename(), 1, null);
 				inited = true;
@@ -75,7 +74,6 @@ public class JSExecutor {
 				
 				Object fnArgs[] = {wrappedEditor, actionName};
 				Function f = (Function) fnObj;
-				System.out.println("ZC: running action " + actionName);
 				Object result = f.call(cx, scope, scope, fnArgs);
 				return Context.toBoolean(result);
 			} else {
