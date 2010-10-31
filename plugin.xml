@@ -64,5 +64,36 @@
 	<extension point="org.eclipse.ui.startup">
 		<startup class="ru.zencoding.eclipse.Startup"/>
 	</extension>
+ <extension
+       point="org.eclipse.ui.preferencePages">
+    <page
+          class="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage"
+          id="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage"
+          name="Zen Coding">
+    </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.ZenCodingTemplatesPreferencesPage"
+          id="ru.zencoding.eclipse.preferences.ZenCodingTemplatesPreferencesPage"
+          name="Templates"
+          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
+    </page>
+ </extension>
+ <extension
+       point="org.eclipse.core.runtime.preferences">
+    <initializer
+          class="ru.zencoding.eclipse.preferences.PreferenceInitializer">
+    </initializer>
+ </extension>
+ 
+ <extension point="org.eclipse.ui.editors.templates">
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.templates.html"
+               name="HTML"/>
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.templates.css"
+               name="CSS"/>
+    </extension>
 
 </plugin>

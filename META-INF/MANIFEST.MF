@@ -15,4 +15,5 @@ Bundle-ClassPath: src/js.jar,
 Import-Package: org.eclipse.core.resources,
  org.eclipse.jface.text,
  org.eclipse.ui.editors.text,
- org.eclipse.ui.texteditor
+ org.eclipse.ui.texteditor,
+ org.eclipse.ui.texteditor.templates
