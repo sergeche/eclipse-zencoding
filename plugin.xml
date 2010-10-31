@@ -13,12 +13,21 @@
             categoryId="ru.zencoding.eclipse.commands.category"
             id="ru.zencoding.eclipse.commands.expandAbbreviationCommand">
       </command>
+      <command
+            name="Match Pair"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.matchPairCommand">
+      </command>
    </extension>
    <extension
          point="org.eclipse.ui.handlers">
       <handler
             commandId="ru.zencoding.eclipse.commands.expandAbbreviationCommand"
             class="ru.zencoding.eclipse.handlers.ExpandAbbreviationAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.matchPairCommand"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
       </handler>
    </extension>
    <extension
@@ -42,6 +51,11 @@
                   commandId="ru.zencoding.eclipse.commands.expandAbbreviationCommand"
                   mnemonic="E"
                   id="ru.zencoding.eclipse.menus.expandAbbreviationCommand">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.matchPairCommand"
+                  mnemonic="M"
+                  id="ru.zencoding.eclipse.menus.matchPairCommand">
             </command>
          </menu>
       </menuContribution>

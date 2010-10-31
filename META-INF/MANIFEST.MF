@@ -3,7 +3,7 @@ Bundle-ManifestVersion: 2
 Bundle-Name: Zen Coding for Eclipse
 Bundle-SymbolicName: ru.zencoding.eclipse; singleton:=true
 Bundle-Version: 1.0.0
-Bundle-Activator: ru.zencoding.eclipse.Activator
+Bundle-Activator: ru.zencoding.eclipse.EclipseZenCodingPlugin
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
  org.eclipse.ui.editors;bundle-version="3.6.0",
