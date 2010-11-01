@@ -42,14 +42,15 @@ public class JSExecutor {
 			System.err.println("Can't get reader");
 		}
 		
-		reloadUserSettings();
 	}
 
 	public static JSExecutor getSingleton() {
 		if (singleton == null) {
 			synchronized (JSExecutor.class) {
-				if (singleton == null)
+				if (singleton == null) {
 					singleton = new JSExecutor();
+					singleton.reloadUserSettings();
+				}
 			}
 		}
 		return singleton;
@@ -89,6 +90,7 @@ public class JSExecutor {
 		if (fnObj instanceof Function) hasVariableFn = (Function) fnObj;
 		else return false;
 		
+		System.out.println("References cached");
 		return true;
 	}
 
@@ -138,8 +140,12 @@ public class JSExecutor {
 	 * @return
 	 */
 	public boolean hasVariable(String name) {
-		Object fnArgs[] = {name};
-		Object result = hasVariableFn.call(cx, scope, scope, fnArgs);
-		return Context.toBoolean(result);
+		if (isInited()) {
+			Object fnArgs[] = {name};
+			Object result = hasVariableFn.call(cx, scope, scope, fnArgs);
+			return Context.toBoolean(result);
+		} else {
+			return false;
+		}
 	}
 }

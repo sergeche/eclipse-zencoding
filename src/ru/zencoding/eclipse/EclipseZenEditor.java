@@ -133,16 +133,15 @@ public class EclipseZenEditor implements IZenEditor {
 			doc.replace(start, end - start, newValue);
 			
 			int totalLinks = tabStops.getTabStopsCount();
-			String[] tabGroups = tabStops.getSortedGroupKeys();
 			
 			if (totalLinks < 1) {
 				tabStops.addTabStopToGroup("carets", newValue.length(), newValue.length());
 			}
 			
-			// FIXME java.lang.ArrayIndexOutOfBoundsException
-			TabStop firstTabStop = tabStops.getTabStop(tabGroups[0], 0);
+			String[] tabGroups = tabStops.getSortedGroupKeys();
+			TabStop firstTabStop = tabStops.getFirstTabStop();
 			
-			if (totalLinks > 1 || firstTabStop.getStart() != firstTabStop.getEnd()) {
+			if (totalLinks > 1 || firstTabStop != null && firstTabStop.getStart() != firstTabStop.getEnd()) {
 				ITextViewer viewer = getTextViewer();
 				LinkedModeModel model = new LinkedModeModel();
 				
@@ -185,31 +184,27 @@ public class EclipseZenEditor implements IZenEditor {
 		return getTextViewer(editor);
 	}
 	
-	private String findTabStopLabels(String text, Properties tabStopLabels) {
+	private void findTabStopLabels(String text, Properties tabStopLabels) {
 		Pattern reLabels = Pattern.compile("\\$\\{(\\d+):([^\\}]+)\\}");
 		Matcher mLabels = reLabels.matcher(text);
-		StringBuffer sbLabels = new StringBuffer();
 		while (mLabels.find()) {
-			tabStopLabels.put(mLabels.group(0), mLabels.group(1));
-			mLabels.appendReplacement(sbLabels, "");
+			tabStopLabels.put(mLabels.group(1), mLabels.group(2));
 		}
-		
-		mLabels.appendTail(sbLabels);
-		return sbLabels.toString();
 	}
 	
 	private String normalizeTabStops(String text, Properties tabStopLabels) {
 		Matcher mLabels = reTabStops.matcher(text);
 		StringBuffer sbLabels = new StringBuffer();
 		String labelNum;
+		
 		while (mLabels.find()) {
-			if (!mLabels.group(0).isEmpty())
-				labelNum = mLabels.group(0);
-			else
+			if (mLabels.group(1) != null)
 				labelNum = mLabels.group(1);
+			else
+				labelNum = mLabels.group(2);
 			
 			if (tabStopLabels.containsKey(labelNum)) {
-				mLabels.appendReplacement(sbLabels, "${" + labelNum + ":" + tabStopLabels.get(labelNum) + "}");
+				mLabels.appendReplacement(sbLabels, "\\${" + labelNum + ":" + tabStopLabels.get(labelNum) + "}");
 			}
 		}
 		
@@ -226,10 +221,10 @@ public class EclipseZenEditor implements IZenEditor {
 		String labelNum;
 		
 		while (mLabels.find()) {
-			if (!mLabels.group(0).isEmpty())
-				labelNum = mLabels.group(0);
-			else
+			if (mLabels.group(1) != null)
 				labelNum = mLabels.group(1);
+			else
+				labelNum = mLabels.group(2);
 			
 			label = (String) tabStopLabels.get(labelNum);
 			if (label == null)
@@ -280,7 +275,7 @@ public class EclipseZenEditor implements IZenEditor {
 		// then replace short notations (like $1) with labels (normalize), and 
 		// finally save their positions
 		Properties tabStopLabels = new Properties();
-		text = findTabStopLabels(text, tabStopLabels);
+		findTabStopLabels(text, tabStopLabels);
 		text = normalizeTabStops(text, tabStopLabels);
 		
 		TabStopStructure tabStops = createTabStopStructure(text, tabStopLabels);

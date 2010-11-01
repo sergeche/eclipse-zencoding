@@ -1,6 +1,7 @@
 package ru.zencoding;
 
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Properties;
@@ -79,11 +80,17 @@ public class TabStopStructure {
 		return keys;
 	}
 	
+	public TabStop getFirstTabStop() {
+		String[] names = getSortedGroupKeys();
+		return (names.length > 0) ? getTabStop(names[0], 0) : null;
+	}
+	
 	public TabStopGroup getTabStopGroup(String groupName) {
 		return (TabStopGroup) groups.get(groupName);
 	}
 	
 	public TabStop getTabStop(String groupName, int index) {
-		return getTabStopGroup(groupName).getTabStopList().get(index);
+		ArrayList<TabStop> tabStops = getTabStopGroup(groupName).getTabStopList();
+		return (index < tabStops.size()) ? tabStops.get(index) : null;
 	}
 }
