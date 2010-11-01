@@ -105,7 +105,8 @@ public class JSExecutor {
 				for (Template template : templates) {
 					String ctxId = template.getContextTypeId();
 					String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
-					Object fnArgs[] = {syntax, "abbreviations", template.getName(), template.getPattern()};
+					Object fnArgs[] = {syntax, "abbreviations", template.getName(),
+							EclipseTemplateProcessor.process(template.getPattern())};
 					addResourceFn.call(cx, scope, scope, fnArgs);
 				}
 			} else {
