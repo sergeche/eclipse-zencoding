@@ -13,7 +13,12 @@ public class ZenCodingAbbreviationsPreferencesPage extends TemplatePreferencePag
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
         setTemplateStore(TemplateHelper.getTemplateStore());
         setContextTypeRegistry(TemplateHelper.getContextTypeRegistry());
-        setDescription("Abbreviations for Zen Coding");
+        setDescription("Abbreviations for Zen Coding are building blocks for XHTML tags. " +
+        		"Abbreviation should look like opening XHTML tag, e.g.:\n" +
+        		"<div class=\"text\">\n\n" +
+        		"The forward slash at the of tag definition means that a self-closing " +
+        		"form of this element is preffered, e.g.:\n" +
+        		"<img src=\"myimage.png\" />");
 	}
 
 	@Override
