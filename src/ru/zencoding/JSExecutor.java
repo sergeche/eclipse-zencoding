@@ -20,6 +20,11 @@ public class JSExecutor {
 	private Reader fReader;
 	private boolean inited = false; 
 	private String fileName = "zencoding.js";
+	
+	private Function runActionFn;
+	private Function resetVarsFn;
+	private Function addResourceFn;
+	private Function hasVariableFn;
 
 	private JSExecutor() {
 		inited = false;
@@ -29,7 +34,7 @@ public class JSExecutor {
 		if (input != null) {
 			try {
 				cx.evaluateReader(scope, input, getFilename(), 1, null);
-				inited = true;
+				inited = cachRefs();
 			} catch (IOException e) {
 				System.err.println(e.getMessage());
 			}
@@ -61,6 +66,31 @@ public class JSExecutor {
 		}
 		return fReader;
 	}
+	
+	/**
+	 * Caches references to JavaScript functions
+	 * @return
+	 */
+	private boolean cachRefs() {
+		Object fnObj;
+		fnObj = scope.get("runZenCodingAction", scope);
+		if (fnObj instanceof Function) runActionFn = (Function) fnObj;
+		else return false;
+		
+		fnObj = scope.get("resetUserSettings", scope);
+		if (fnObj instanceof Function) resetVarsFn = (Function) fnObj;
+		else return false;
+		
+		fnObj = scope.get("addUserResource", scope);
+		if (fnObj instanceof Function) addResourceFn = (Function) fnObj;
+		else return false;
+		
+		fnObj = scope.get("hasZenCodingVariable", scope);
+		if (fnObj instanceof Function) hasVariableFn = (Function) fnObj;
+		else return false;
+		
+		return true;
+	}
 
 	
 	public boolean isInited() {
@@ -73,45 +103,43 @@ public class JSExecutor {
 	 */
 	public boolean runAction(IZenEditor editor, String actionName) {
 		if (isInited()) {
-			Object fnObj = scope.get("runZenCodingAction", scope);
-			if (fnObj instanceof Function) {
-				
-				Object wrappedEditor = Context.javaToJS(editor, scope);
-				
-				Object fnArgs[] = {wrappedEditor, actionName};
-				Function f = (Function) fnObj;
-				Object result = f.call(cx, scope, scope, fnArgs);
-				return Context.toBoolean(result);
-			} else {
-				System.err.println("Cannot get 'runZenCodingAction' function from JS");
-			}
+			Object wrappedEditor = Context.javaToJS(editor, scope);
+			Object fnArgs[] = {wrappedEditor, actionName};
+			Object result = runActionFn.call(cx, scope, scope, fnArgs);
+			return Context.toBoolean(result);
 		}
 		
 		return false;
 	}
 	
+	/**
+	 * Reloads user-defined Zen Coding abbreviations and snippets: removes old
+	 * and adds new ones
+	 */
 	public void reloadUserSettings() {
 		if (isInited()) {
-			Object resetObj = scope.get("resetUserSettings", scope);
-			Object addResourceObj = scope.get("addUserResource", scope);
+			resetVarsFn.call(cx, scope, scope, null);
+			TemplateStore storage = TemplateHelper.getTemplateStore();
+			Template[] templates = storage.getTemplates();
 			
-			if (resetObj instanceof Function && addResourceObj instanceof Function) {
-				((Function) resetObj).call(cx, scope, scope, null);
-				TemplateStore storage = TemplateHelper.getTemplateStore();
-				Template[] templates = storage.getTemplates();
-				
-				Function addResourceFn = (Function) addResourceObj;
-				
-				for (Template template : templates) {
-					String ctxId = template.getContextTypeId();
-					String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
-					Object fnArgs[] = {syntax, "abbreviations", template.getName(),
-							EclipseTemplateProcessor.process(template.getPattern())};
-					addResourceFn.call(cx, scope, scope, fnArgs);
-				}
-			} else {
-				System.err.println("some of the objects are not functions");
+			for (Template template : templates) {
+				String ctxId = template.getContextTypeId();
+				String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
+				Object fnArgs[] = {syntax, "abbreviations", template.getName(),
+						EclipseTemplateProcessor.process(template.getPattern())};
+				addResourceFn.call(cx, scope, scope, fnArgs);
 			}
 		}
+	}
+	
+	/**
+	 * Check if Zen Coding has predefined variable of that name
+	 * @param name
+	 * @return
+	 */
+	public boolean hasVariable(String name) {
+		Object fnArgs[] = {name};
+		Object result = hasVariableFn.call(cx, scope, scope, fnArgs);
+		return Context.toBoolean(result);
 	}
 }

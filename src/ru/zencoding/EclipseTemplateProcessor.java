@@ -39,6 +39,9 @@ public class EclipseTemplateProcessor {
 						varName = template.substring(i + 2, varEnd);
 						if (varName.equals("cursor")) {
 							result.append('|');
+						} else if (varName.equals("child") || JSExecutor.getSingleton().hasVariable(varName)) {
+							// ZC has predefined variable of that name, leave as is
+							result.append("${" + varName + "}");
 						} else {
 							varPos = variables.indexOf(varName);
 							if (varPos == -1) {

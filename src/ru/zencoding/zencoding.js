@@ -4221,3 +4221,7 @@ function addUserResource(syntax, type, abbr, value) {
 		obj[abbr] = value;
 	}
 }
+
+function hasZenCodingVariable(name) {
+	return !!zen_coding.getVariable(name);
+}
