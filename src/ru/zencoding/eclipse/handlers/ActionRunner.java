@@ -1,13 +1,9 @@
 package ru.zencoding.eclipse.handlers;
 
-import org.eclipse.jface.text.Document;
 import org.eclipse.ui.IEditorPart;
-import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.editors.text.TextEditor;
-import org.eclipse.ui.texteditor.IDocumentProvider;
-import org.eclipse.ui.texteditor.ITextEditor;
 
 import ru.zencoding.JSExecutor;
+import ru.zencoding.eclipse.EclipseZenCodingHelper;
 import ru.zencoding.eclipse.EclipseZenEditor;
 
 public class ActionRunner {
@@ -30,27 +26,7 @@ public class ActionRunner {
 		return singleton;
 	}
 	
-	public TextEditor getActiveEditor() {
-		IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
-		if (editor instanceof ITextEditor) {
-			return (TextEditor) editor;
-		}
-		
-		return null;
-	}
 	
-	public Document getActiveDocument() {
-		return getDocument(getActiveEditor());
-	}
-	
-	public static Document getDocument(TextEditor editor) {
-		if (editor != null) {
-			IDocumentProvider dp = editor.getDocumentProvider();
-			return (Document) dp.getDocument(editor.getEditorInput());
-		}
-		
-		return null;
-	}
 	
 	/**
 	 * Runs Zen Coding action, automatically setting up context editor
@@ -58,10 +34,15 @@ public class ActionRunner {
 	 * @return
 	 */
 	public boolean run(String actionName) {
-		TextEditor editor = getActiveEditor();
+		IEditorPart editor = EclipseZenCodingHelper.getActiveEditor();
 		if (editor != null) {
-			zenEditor.setContext(editor);
-			return js.runAction(zenEditor, actionName);
+			try {
+				zenEditor.setContext(editor);
+				return js.runAction(zenEditor, actionName);
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 		
 		return false;

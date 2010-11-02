@@ -1,6 +1,5 @@
 package ru.zencoding.eclipse;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Properties;
 import java.util.regex.Matcher;
@@ -9,10 +8,11 @@ import java.util.regex.Pattern;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.jface.dialogs.InputDialog;
 import org.eclipse.jface.text.BadLocationException;
-import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
 import org.eclipse.jface.text.ITextViewer;
+import org.eclipse.jface.text.TextSelection;
 import org.eclipse.jface.text.link.LinkedModeModel;
 import org.eclipse.jface.text.link.LinkedModeUI;
 import org.eclipse.jface.text.link.LinkedPosition;
@@ -22,9 +22,7 @@ import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
-import org.eclipse.ui.editors.text.TextEditor;
-import org.eclipse.ui.texteditor.AbstractTextEditor;
-import org.eclipse.ui.texteditor.IDocumentProvider;
+import org.eclipse.ui.IEditorPart;
 
 import ru.zencoding.IZenEditor;
 import ru.zencoding.SelectionData;
@@ -34,8 +32,8 @@ import ru.zencoding.TabStopStructure;
 
 public class EclipseZenEditor implements IZenEditor {
 
-	private TextEditor editor;
-	private Document doc;
+	private IEditorPart editor;
+	private IDocument doc;
 	private String caretPlaceholder = "{%::zen-caret::%}";
 	
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
@@ -45,25 +43,22 @@ public class EclipseZenEditor implements IZenEditor {
 		
 	}
 	
-	public EclipseZenEditor(TextEditor editor) {
+	public EclipseZenEditor(IEditorPart editor) {
 		setContext(editor);
 	}
 	
-	public static ITextViewer getTextViewer(TextEditor editor) throws Exception {
-		Field svField = AbstractTextEditor.class.getDeclaredField("fSourceViewer");
-		svField.setAccessible(true);
-		return (ITextViewer) svField.get((AbstractTextEditor) editor);
+	public void setContext(IEditorPart editor) {
+		this.editor = editor;
+		doc = EclipseZenCodingHelper.getDocument(editor);
 	}
 	
-	public void setContext(TextEditor editor) {
-		this.editor = editor;
-		IDocumentProvider dp = editor.getDocumentProvider();
-		doc = (Document) dp.getDocument(editor.getEditorInput());
+	public boolean isValid() {
+		return editor != null && doc != null;
 	}
 	
 	@Override
 	public SelectionData getSelectionRange() {
-		ISelectionProvider sp = editor.getSelectionProvider();
+		ISelectionProvider sp = editor.getEditorSite().getSelectionProvider();
 		ISelection selection = sp.getSelection();
 			
 		SelectionData result = new SelectionData();
@@ -78,7 +73,7 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public void createSelection(int start, int end) {
-		editor.selectAndReveal(start, end - start);
+		editor.getEditorSite().getSelectionProvider().setSelection(new TextSelection(start, end - start));
 	}
 
 	@Override
@@ -142,7 +137,7 @@ public class EclipseZenEditor implements IZenEditor {
 			TabStop firstTabStop = tabStops.getFirstTabStop();
 			
 			if (totalLinks > 1 || firstTabStop != null && firstTabStop.getStart() != firstTabStop.getEnd()) {
-				ITextViewer viewer = getTextViewer();
+				ITextViewer viewer = EclipseZenCodingHelper.getTextViewer(editor);
 				LinkedModeModel model = new LinkedModeModel();
 				
 				for (int i = 0; i < tabGroups.length; i++) {
@@ -178,10 +173,6 @@ public class EclipseZenEditor implements IZenEditor {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-	}
-	
-	public ITextViewer getTextViewer() throws Exception {
-		return getTextViewer(editor);
 	}
 	
 	private void findTabStopLabels(String text, Properties tabStopLabels) {
@@ -325,7 +316,10 @@ public class EclipseZenEditor implements IZenEditor {
 		StringBuilder result = new StringBuilder();
 		
 		String lines[] = text.split("\\r?\\n");
-		String newline = doc.getDefaultLineDelimiter();
+		String newline = "\n";
+		String[] legalNl = doc.getLegalLineDelimiters();
+		if (legalNl != null && legalNl.length > 0)
+			newline = legalNl[0];
 			
 		if (lines.length > 0) {
 			result.append(lines[0]);
@@ -412,11 +406,11 @@ public class EclipseZenEditor implements IZenEditor {
 		return path;
 	}
 	
-	public TextEditor getEditor() {
+	public IEditorPart getEditor() {
 		return editor;
 	}
 	
-	public Document getDocument() {
+	public IDocument getDocument() {
 		return doc;
 	}
 

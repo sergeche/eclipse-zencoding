@@ -2,16 +2,17 @@ package ru.zencoding.eclipse;
 
 import java.util.HashMap;
 
-import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.link.LinkedModeModel;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.custom.VerifyKeyListener;
 import org.eclipse.swt.events.VerifyEvent;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IPartListener;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
-import org.eclipse.ui.editors.text.TextEditor;
+import org.eclipse.ui.texteditor.AbstractTextEditor;
 
 import ru.zencoding.eclipse.handlers.ActionRunner;
 
@@ -21,19 +22,34 @@ import ru.zencoding.eclipse.handlers.ActionRunner;
  *
  */
 public class TabKeyHandler {
-	private static HashMap<Integer, TextEditor> installedEditors = new HashMap<Integer, TextEditor>();
+	private static HashMap<Integer, AbstractTextEditor> installedEditors = new HashMap<Integer, AbstractTextEditor>();
 	private static HashMap<Integer, VerifyKeyListener> keyListeners = new HashMap<Integer, VerifyKeyListener>();
 	private static boolean inited = false;
 	
 	/**
 	 * Tries to install key listener on editor's widget
 	 */
-	public static void install(TextEditor editor) {
+	public static void install(IWorkbenchPart part) {
+		IEditorPart editor;
+		if (part instanceof IEditorPart) {
+			editor = EclipseZenCodingHelper.getTextEditor((IEditorPart) part);
+			if (editor instanceof AbstractTextEditor)
+				install((AbstractTextEditor) editor);
+		}
+	}
+	
+	/**
+	 * Tries to install key listener on editor's widget
+	 */
+	public static void install(AbstractTextEditor editor) {
+		if (editor == null)
+			return;
+		
 		Integer id = getEditorId(editor);
 		if (!installedEditors.containsKey(id)) {
 			// install key listener for Tab key
 			try {
-				ITextViewer textViewer = EclipseZenEditor.getTextViewer(editor);
+				ITextViewer textViewer = EclipseZenCodingHelper.getTextViewer(editor);
 				StyledText widget = textViewer.getTextWidget();
 				widget.addVerifyKeyListener(getKeyListener(editor));
 				installedEditors.put(id, editor);
@@ -47,11 +63,14 @@ public class TabKeyHandler {
 	 * Uninstalls Tab key listener from editor
 	 * @param editor
 	 */
-	public static void uninstall(TextEditor editor) {
+	public static void uninstall(AbstractTextEditor editor) {
+		if (editor == null)
+			return;
+		
 		Integer id = getEditorId(editor);
 		if (installedEditors.containsKey(id)) {
 			try {
-				StyledText widget = EclipseZenEditor.getTextViewer(editor).getTextWidget();
+				StyledText widget = EclipseZenCodingHelper.getTextViewer(editor).getTextWidget();
 				widget.removeVerifyKeyListener(getKeyListener(editor));
 				installedEditors.remove(id);
 				keyListeners.remove(id);
@@ -61,23 +80,32 @@ public class TabKeyHandler {
 		}
 	}
 	
+	public static void uninstall(IWorkbenchPart part) {
+		IEditorPart editor;
+		if (part instanceof IEditorPart) {
+			editor = EclipseZenCodingHelper.getTextEditor((IEditorPart) part);
+			if (editor instanceof AbstractTextEditor)
+				uninstall((AbstractTextEditor) editor);
+		}
+	}
+	
 	/**
 	 * Returns unique editor ID
 	 * @param editor
 	 * @return
 	 */
-	public static Integer getEditorId(TextEditor editor) {
+	public static Integer getEditorId(AbstractTextEditor editor) {
 		return editor.hashCode();
 	}
 	
-	public static VerifyKeyListener getKeyListener(final TextEditor editor) {
+	public static VerifyKeyListener getKeyListener(final AbstractTextEditor editor) {
 		Integer id = getEditorId(editor);
 		if (!keyListeners.containsKey(id)) {
 			keyListeners.put(id, new VerifyKeyListener() {
 				
 				@Override
 				public void verifyKey(VerifyEvent event) {
-					Document document = ActionRunner.getDocument(editor);
+					IDocument document = EclipseZenCodingHelper.getDocument(editor);
 					if (document == null) {
 						return;
 					}
@@ -108,9 +136,7 @@ public class TabKeyHandler {
 				
 				@Override
 				public void partOpened(IWorkbenchPart part) {
-					if (part instanceof TextEditor) {
-						install((TextEditor) part);
-					}
+					install(part);
 				}
 				
 				@Override
@@ -120,9 +146,7 @@ public class TabKeyHandler {
 				
 				@Override
 				public void partClosed(IWorkbenchPart part) {
-					if (part instanceof TextEditor) {
-						uninstall((TextEditor) part);
-					}
+					uninstall(part);
 				}
 				
 				@Override
@@ -132,9 +156,7 @@ public class TabKeyHandler {
 				
 				@Override
 				public void partActivated(IWorkbenchPart part) {
-					if (part instanceof TextEditor) {
-						install((TextEditor) part);
-					}
+					install(part);
 				}
 			});
 		}
