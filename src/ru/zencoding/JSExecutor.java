@@ -121,16 +121,20 @@ public class JSExecutor {
 	public void reloadUserSettings() {
 		if (isInited()) {
 			resetVarsFn.call(cx, scope, scope, null);
-			TemplateStore storage = TemplateHelper.getTemplateStore();
-			Template[] templates = storage.getTemplates();
-			
-			for (Template template : templates) {
-				String ctxId = template.getContextTypeId();
-				String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
-				Object fnArgs[] = {syntax, "abbreviations", template.getName(),
-						EclipseTemplateProcessor.process(template.getPattern())};
-				addResourceFn.call(cx, scope, scope, fnArgs);
-			}
+			saveSettings("abbreviations");
+			saveSettings("snippets");
+		}
+	}
+	
+	private void saveSettings(String type) {
+		TemplateStore storage = TemplateHelper.getTemplateStore(type);
+		Template[] templates = storage.getTemplates();
+		for (Template template : templates) {
+			String ctxId = template.getContextTypeId();
+			String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
+			Object fnArgs[] = {syntax, type, template.getName(),
+					EclipseTemplateProcessor.process(template.getPattern())};
+			addResourceFn.call(cx, scope, scope, fnArgs);
 		}
 	}
 	

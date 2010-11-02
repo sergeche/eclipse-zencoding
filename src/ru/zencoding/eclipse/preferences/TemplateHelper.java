@@ -1,6 +1,7 @@
 package ru.zencoding.eclipse.preferences;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 import org.eclipse.jface.text.templates.ContextTypeRegistry;
 import org.eclipse.jface.text.templates.persistence.TemplateStore;
@@ -11,8 +12,8 @@ import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 import ru.zencoding.eclipse.ZenCodingContextType;
 
 public class TemplateHelper {
-	/** The template store. */
-    private static TemplateStore fStore;
+    /** The template store list. */
+    private static HashMap<String, TemplateStore> fStoreList = new HashMap<String, TemplateStore>();
 
     /** The context type registry. */
     private static ContributionContextTypeRegistry fRegistry;
@@ -25,18 +26,21 @@ public class TemplateHelper {
      * 
      * @return the template store of this plug-in instance
      */
-    public static TemplateStore getTemplateStore() {
-        if (fStore == null) {
-            fStore = new ContributionTemplateStore(TemplateHelper.getContextTypeRegistry(), 
-                    EclipseZenCodingPlugin.getDefault().getPreferenceStore(), CUSTOM_TEMPLATES_KEY);
-            try {
-                fStore.load();
-            } catch (IOException e) {
-                e.printStackTrace();
-                throw new RuntimeException(e);
-            }
-        }
-        return fStore;
+    public static TemplateStore getTemplateStore(String type) {
+    	if (!fStoreList.containsKey(type)) {
+    		ContributionTemplateStore store = new ContributionTemplateStore(TemplateHelper.getContextTypeRegistry(), 
+    				EclipseZenCodingPlugin.getDefault().getPreferenceStore(), CUSTOM_TEMPLATES_KEY + "." + type);
+    		try {
+    			store.load();
+    			fStoreList.put(type, store);
+    		} catch (IOException e) {
+    			e.printStackTrace();
+    			throw new RuntimeException(e);
+    		}
+    		
+    	}
+    	
+        return fStoreList.get(type);
     }
 
     /**
@@ -46,13 +50,12 @@ public class TemplateHelper {
      */
     public static ContextTypeRegistry getContextTypeRegistry() {
         if (fRegistry == null) {
-            // create an configure the contexts available in the template editor
+            // create and configure the contexts available in the template editor
             fRegistry = new ContributionContextTypeRegistry();
             fRegistry.addContextType(ZenCodingContextType.CTX_HTML);
             fRegistry.addContextType(ZenCodingContextType.CTX_CSS);
-            
-            
         }
+        
         return fRegistry;
     }
 }

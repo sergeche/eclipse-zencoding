@@ -77,6 +77,12 @@
           name="Abbreviations"
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.ZenCodingSnippetsPreferencesPage"
+          id="ru.zencoding.eclipse.preferences.ZenCodingSnippetsPreferencesPage"
+          name="Snippets"
+          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
+    </page>
  </extension>
  <extension
        point="org.eclipse.core.runtime.preferences">
