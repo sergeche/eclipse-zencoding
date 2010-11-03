@@ -16,7 +16,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 	public static String prefSuffix = "default";
 	
 	public DefaultOutputPreferencePage() {
-		super(GRID);
+		super(FLAT);
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
 		setDescription(getPageDescription());
 	}
@@ -47,7 +47,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 					{ "&Lowercase", "lower" }, 
 					{ "&Uppercase", "upper" },
 					{ "&As is", "leave" }
-		}, getFieldEditorParent()));
+		}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
 				getPrefName(PreferenceConstants.P_PROFILE_ATTR_CASE),
@@ -57,7 +57,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 					{ "L&owercase", "lower" }, 
 					{ "U&ppercase", "upper" },
 					{ "A&s is", "leave" }
-				}, getFieldEditorParent()));
+				}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
 				getPrefName(PreferenceConstants.P_PROFILE_ATTR_QUOTES),
@@ -66,7 +66,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 				new String[][] { 
 					{ "S&ingle", "single" }, 
 					{ "&Double", "bouble" }
-				}, getFieldEditorParent()));
+				}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
 				getPrefName(PreferenceConstants.P_PROFILE_TAG_NEWLINE),
@@ -76,7 +76,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 					{ "Yes", "true" }, 
 					{ "No", "false" },
 					{ "Decide", "decide" }
-				}, getFieldEditorParent()));
+				}, getFieldEditorParent(), true));
 		
 		addField(new BooleanFieldEditor(
 				getPrefName(PreferenceConstants.P_PROFILE_PLACE_CURSOR),
@@ -102,7 +102,9 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 					{ "Disabled (<br>)", "false" }, 
 					{ "Enabled (<br/>)", "true" },
 					{ "XHTML-style (<br />)", "xhtml" }
-				}, getFieldEditorParent()));
+				}, getFieldEditorParent(), true));
+		
+		addField(new SpacerFieldEditor(getFieldEditorParent()));
 		
 		addField(
 			new StringFieldEditor(getPrefName(PreferenceConstants.P_FILTERS), "Applied &filters:", getFieldEditorParent()));
