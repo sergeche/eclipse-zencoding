@@ -88,11 +88,14 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 				"Indent tags",
 				getFieldEditorParent()));
 		
-		addField(new IntegerFieldEditor(
-				getPrefName(PreferenceConstants.P_PROFILE_INLINE_BREAK),
-				"How many inline elements should be to force line break",
-				getFieldEditorParent(),
-				3));
+		SpinnerFieldEditor inlineBreak = new SpinnerFieldEditor(
+			getPrefName(PreferenceConstants.P_PROFILE_INLINE_BREAK),
+			"How many inline elements should be to force line break",
+			6,
+			getFieldEditorParent());
+		
+		inlineBreak.setValidRange(0, 99);
+		addField(inlineBreak);
 		
 		addField(new RadioGroupFieldEditor(
 				getPrefName(PreferenceConstants.P_PROFILE_SELF_CLOSING_TAG),
