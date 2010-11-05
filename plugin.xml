@@ -83,6 +83,15 @@
           name="Snippets"
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
+    
+    <page
+          class="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
+          id="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
+          name="Variables"
+          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
+    </page>
+    
+    <!-- Output preferences -->
     <page
           class="ru.zencoding.eclipse.preferences.output.DefaultOutputPreferencePage"
           id="ru.zencoding.eclipse.preferences.OutputPreferencesPage"
@@ -90,10 +99,34 @@
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
     <page
-          class="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
-          id="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
-          name="Variables"
-          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
+          class="ru.zencoding.eclipse.preferences.output.HTMLOutputPreferencePage"
+          id="ru.zencoding.eclipse.preferences.HTMLPreferencesPage"
+          name="HTML"
+          category="ru.zencoding.eclipse.preferences.OutputPreferencesPage">
+    </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.output.CSSOutputPreferencePage"
+          id="ru.zencoding.eclipse.preferences.CSSPreferencesPage"
+          name="CSS"
+          category="ru.zencoding.eclipse.preferences.OutputPreferencesPage">
+    </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.output.XMLOutputPreferencePage"
+          id="ru.zencoding.eclipse.preferences.XMLPreferencesPage"
+          name="XML"
+          category="ru.zencoding.eclipse.preferences.OutputPreferencesPage">
+    </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.output.XSLOutputPreferencePage"
+          id="ru.zencoding.eclipse.preferences.XSLPreferencesPage"
+          name="XSL"
+          category="ru.zencoding.eclipse.preferences.OutputPreferencesPage">
+    </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.output.HAMLOutputPreferencePage"
+          id="ru.zencoding.eclipse.preferences.HAMLPreferencesPage"
+          name="HAML"
+          category="ru.zencoding.eclipse.preferences.OutputPreferencesPage">
     </page>
  </extension>
  <extension

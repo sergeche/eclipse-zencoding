@@ -2,7 +2,6 @@ package ru.zencoding.eclipse.preferences.output;
 
 import org.eclipse.jface.preference.BooleanFieldEditor;
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
-import org.eclipse.jface.preference.IntegerFieldEditor;
 import org.eclipse.jface.preference.RadioGroupFieldEditor;
 import org.eclipse.jface.preference.StringFieldEditor;
 import org.eclipse.ui.IWorkbench;
@@ -16,20 +15,17 @@ import ru.zencoding.eclipse.preferences.SpinnerFieldEditor;
 public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 		implements IWorkbenchPreferencePage {
 	
-	public static String prefSuffix = "default";
+	private String prefSuffix = "";
 	
 	public DefaultOutputPreferencePage() {
 		super(FLAT);
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
-		setDescription(getPageDescription());
+		setDescription("Default output preferences for unknown syntaxes (like JavaScript, Python, etc.)");
+		setPrefSuffix("default");
 	}
 	
-	protected String getPageDescription() {
-		return "A demonstration of a preference page implementation";
-	}
-	
-	public static String getPrefName(String prefix) {
-		return prefix + "_" + prefSuffix;
+	public String getPrefName(String prefix) {
+		return prefix + "_" + getPrefSuffix();
 	}
 	
 	/* (non-Javadoc)
@@ -47,9 +43,9 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 			"Tag case:",
 			3,
 			new String[][] { 
-					{ "&Lowercase", "lower" }, 
-					{ "&Uppercase", "upper" },
-					{ "&As is", "leave" }
+					{ "&Lowercase", OutputProfile.LOWERCASE }, 
+					{ "&Uppercase", OutputProfile.UPPERCASE },
+					{ "&As is", OutputProfile.LEAVE }
 		}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
@@ -57,9 +53,9 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 				"Attribute case:",
 				3,
 				new String[][] { 
-					{ "L&owercase", "lower" }, 
-					{ "U&ppercase", "upper" },
-					{ "A&s is", "leave" }
+					{ "L&owercase", OutputProfile.LOWERCASE }, 
+					{ "U&ppercase", OutputProfile.UPPERCASE },
+					{ "A&s is", OutputProfile.LEAVE }
 				}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
@@ -67,8 +63,8 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 				"Attribute quotes:",
 				2,
 				new String[][] { 
-					{ "S&ingle", "single" }, 
-					{ "&Double", "bouble" }
+					{ "S&ingle", OutputProfile.SINGE_QUOTES }, 
+					{ "&Double", OutputProfile.DOUBLE_QUOTES }
 				}, getFieldEditorParent(), true));
 		
 		addField(new RadioGroupFieldEditor(
@@ -76,9 +72,9 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 				"Each tag on new line:",
 				3,
 				new String[][] { 
-					{ "Yes", "true" }, 
-					{ "No", "false" },
-					{ "Decide", "decide" }
+					{ "Yes", OutputProfile.TRUE }, 
+					{ "No", OutputProfile.FALSE },
+					{ "Decide", OutputProfile.DECIDE }
 				}, getFieldEditorParent(), true));
 		
 		addField(new BooleanFieldEditor(
@@ -100,23 +96,30 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 		inlineBreak.setValidRange(0, 99);
 		addField(inlineBreak);
 		
-//		addField(new RadioGroupFieldEditor(
-//				getPrefName(PreferenceConstants.P_PROFILE_SELF_CLOSING_TAG),
-//				"Self-closing style for writing empty elements:",
-//				1,
-//				new String[][] { 
-//					{ "Disabled (<br>)", "false" }, 
-//					{ "Enabled (<br/>)", "true" },
-//					{ "XHTML-style (<br />)", "xhtml" }
-//				}, getFieldEditorParent(), true));
+		addField(new RadioGroupFieldEditor(
+				getPrefName(PreferenceConstants.P_PROFILE_SELF_CLOSING_TAG),
+				"Self-closing style for writing empty elements:",
+				1,
+				new String[][] { 
+					{ "Disabled (<br>)", OutputProfile.FALSE }, 
+					{ "Enabled (<br/>)", OutputProfile.TRUE },
+					{ "XHTML-style (<br />)", OutputProfile.XHTML_STYLE }
+				}, getFieldEditorParent(), true));
 		
-//		addField(new VariablesFieldEditor("vars", "Variable example", getFieldEditorParent()));
 		
 		addField(new SpacerFieldEditor(getFieldEditorParent()));
 		
 		addField(
 			new StringFieldEditor(getPrefName(PreferenceConstants.P_FILTERS), "Applied &filters:", getFieldEditorParent()));
 
+	}
+
+	public void setPrefSuffix(String prefSuffix) {
+		this.prefSuffix = prefSuffix;
+	}
+
+	public String getPrefSuffix() {
+		return prefSuffix;
 	}
 
 }
