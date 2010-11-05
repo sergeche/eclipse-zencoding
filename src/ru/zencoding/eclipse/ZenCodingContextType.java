@@ -5,15 +5,11 @@ import org.eclipse.jface.text.templates.TemplateContextType;
 
 public class ZenCodingContextType extends TemplateContextType {
 
-	/**
-	 * Context type used for code-completions
-	 */
 	public static final String CTX_HTML = "ru.zencoding.eclipse.templates.html";
-
-	/**
-	 * Context type used for code-completions
-	 */
 	public static final String CTX_CSS = "ru.zencoding.eclipse.templates.css";
+	public static final String CTX_XML = "ru.zencoding.eclipse.templates.xml";
+	public static final String CTX_XSL = "ru.zencoding.eclipse.templates.xsl";
+	public static final String CTX_HAML = "ru.zencoding.eclipse.templates.haml";
 	
 	public static final String CTX_VARIABLE = "ru.zencoding.eclipse.variable";
 	

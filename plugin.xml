@@ -84,15 +84,9 @@
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
     <page
-          class="ru.zencoding.eclipse.preferences.DefaultOutputPreferencePage"
+          class="ru.zencoding.eclipse.preferences.output.DefaultOutputPreferencePage"
           id="ru.zencoding.eclipse.preferences.OutputPreferencesPage"
           name="Output"
-          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
-    </page>
-    <page
-          class="ru.zencoding.eclipse.preferences.DefaultOutputPreferencePage2"
-          id="ru.zencoding.eclipse.preferences.OutputPreferencesPage2"
-          name="Output2"
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
     <page

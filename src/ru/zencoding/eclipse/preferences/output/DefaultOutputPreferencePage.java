@@ -1,4 +1,4 @@
-package ru.zencoding.eclipse.preferences;
+package ru.zencoding.eclipse.preferences.output;
 
 import org.eclipse.jface.preference.BooleanFieldEditor;
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
@@ -9,6 +9,9 @@ import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
+import ru.zencoding.eclipse.preferences.PreferenceConstants;
+import ru.zencoding.eclipse.preferences.SpacerFieldEditor;
+import ru.zencoding.eclipse.preferences.SpinnerFieldEditor;
 
 public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 		implements IWorkbenchPreferencePage {

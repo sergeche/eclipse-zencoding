@@ -80,6 +80,9 @@ public class TemplateHelper {
             fRegistry = new ContributionContextTypeRegistry();
             fRegistry.addContextType(ZenCodingContextType.CTX_HTML);
             fRegistry.addContextType(ZenCodingContextType.CTX_CSS);
+            fRegistry.addContextType(ZenCodingContextType.CTX_XML);
+            fRegistry.addContextType(ZenCodingContextType.CTX_XSL);
+            fRegistry.addContextType(ZenCodingContextType.CTX_HAML);
         }
         
         return fRegistry;
