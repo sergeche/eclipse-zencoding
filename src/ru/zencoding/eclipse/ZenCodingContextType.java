@@ -15,6 +15,8 @@ public class ZenCodingContextType extends TemplateContextType {
 	 */
 	public static final String CTX_CSS = "ru.zencoding.eclipse.templates.css";
 	
+	public static final String CTX_VARIABLE = "ru.zencoding.eclipse.variable";
+	
 	
 
 	public ZenCodingContextType() {

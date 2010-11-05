@@ -17,6 +17,9 @@ public class TemplateHelper {
 
     /** The context type registry. */
     private static ContributionContextTypeRegistry fRegistry;
+    
+    /** The context type registry. */
+    private static ContributionContextTypeRegistry fVarsRegistry;
 
     /** Key to store custom templates. */
     public static final String CUSTOM_TEMPLATES_KEY = "ru.zencoding.eclipse.preferences.ZenCodingTemplatesPreferencesPage";
@@ -57,5 +60,20 @@ public class TemplateHelper {
         }
         
         return fRegistry;
+    }
+    
+    /**
+     * Returns this plug-in's context type registry.
+     * 
+     * @return the context type registry for this plug-in instance
+     */
+    public static ContextTypeRegistry getVariableContextTypeRegistry() {
+    	if (fVarsRegistry == null) {
+    		// create and configure the contexts available in the template editor
+    		fVarsRegistry = new ContributionContextTypeRegistry();
+    		fVarsRegistry.addContextType(ZenCodingContextType.CTX_VARIABLE);
+    	}
+    	
+    	return fVarsRegistry;
     }
 }

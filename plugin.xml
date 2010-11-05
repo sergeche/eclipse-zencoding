@@ -95,6 +95,12 @@
           name="Output2"
           category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
     </page>
+    <page
+          class="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
+          id="ru.zencoding.eclipse.preferences.ZenCodingVariablesPreferencePage"
+          name="Variables"
+          category="ru.zencoding.eclipse.preferences.EclipseZenCodingPreferencePage">
+    </page>
  </extension>
  <extension
        point="org.eclipse.core.runtime.preferences">
@@ -112,6 +118,35 @@
                class="ru.zencoding.eclipse.ZenCodingContextType"
                id="ru.zencoding.eclipse.templates.css"
                name="CSS"/>
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.variable"
+               name="Variable"/>
+               
+         <template
+            autoinsert="false"
+            name="lang"
+            description=""
+            contextTypeId="ru.zencoding.eclipse.variable"
+            id="ru.zencoding.eclipse.variable.lang">
+			<pattern>en</pattern>
+		</template>
+        <template
+            autoinsert="false"
+            name="locale"
+            description=""
+            contextTypeId="ru.zencoding.eclipse.variable"
+            id="ru.zencoding.eclipse.variable.locale">
+			<pattern>en-US</pattern>
+		</template>
+        <template
+            autoinsert="false"
+            name="charset"
+            description=""
+            contextTypeId="ru.zencoding.eclipse.variable"
+            id="ru.zencoding.eclipse.variable.charset">
+			<pattern>UTF-8</pattern>
+		</template>
     </extension>
 
 </plugin>

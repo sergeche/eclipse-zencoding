@@ -97,15 +97,17 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 		inlineBreak.setValidRange(0, 99);
 		addField(inlineBreak);
 		
-		addField(new RadioGroupFieldEditor(
-				getPrefName(PreferenceConstants.P_PROFILE_SELF_CLOSING_TAG),
-				"Self-closing style for writing empty elements:",
-				1,
-				new String[][] { 
-					{ "Disabled (<br>)", "false" }, 
-					{ "Enabled (<br/>)", "true" },
-					{ "XHTML-style (<br />)", "xhtml" }
-				}, getFieldEditorParent(), true));
+//		addField(new RadioGroupFieldEditor(
+//				getPrefName(PreferenceConstants.P_PROFILE_SELF_CLOSING_TAG),
+//				"Self-closing style for writing empty elements:",
+//				1,
+//				new String[][] { 
+//					{ "Disabled (<br>)", "false" }, 
+//					{ "Enabled (<br/>)", "true" },
+//					{ "XHTML-style (<br />)", "xhtml" }
+//				}, getFieldEditorParent(), true));
+		
+//		addField(new VariablesFieldEditor("vars", "Variable example", getFieldEditorParent()));
 		
 		addField(new SpacerFieldEditor(getFieldEditorParent()));
 		
