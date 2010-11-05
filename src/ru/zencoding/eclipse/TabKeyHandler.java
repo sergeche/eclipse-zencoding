@@ -9,9 +9,11 @@ import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.custom.VerifyKeyListener;
 import org.eclipse.swt.events.VerifyEvent;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.IEditorReference;
 import org.eclipse.ui.IPartListener;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.texteditor.AbstractTextEditor;
 
 import ru.zencoding.eclipse.handlers.ActionRunner;
@@ -25,6 +27,7 @@ public class TabKeyHandler {
 	private static HashMap<Integer, AbstractTextEditor> installedEditors = new HashMap<Integer, AbstractTextEditor>();
 	private static HashMap<Integer, VerifyKeyListener> keyListeners = new HashMap<Integer, VerifyKeyListener>();
 	private static boolean inited = false;
+	private static boolean enabled = true;
 	
 	/**
 	 * Tries to install key listener on editor's widget
@@ -136,7 +139,8 @@ public class TabKeyHandler {
 				
 				@Override
 				public void partOpened(IWorkbenchPart part) {
-					install(part);
+					if (isEnabled())
+						install(part);
 				}
 				
 				@Override
@@ -156,9 +160,44 @@ public class TabKeyHandler {
 				
 				@Override
 				public void partActivated(IWorkbenchPart part) {
-					install(part);
+					if (isEnabled())
+						install(part);
 				}
 			});
 		}
+	}
+	
+	/**
+	 * Try to install tab expander for all opened editors
+	 */
+	public static void installForAll() {
+		IEditorReference[] editors = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getEditorReferences();
+		for (int i = 0; i < editors.length; i++) {
+			IEditorReference editor = editors[i];
+			install(editor.getEditor(false));
+		}
+	}
+	
+	/**
+	 * Try to uninstall tab expander from all opened editors
+	 */
+	public static void uninstallFromAll() {
+		IEditorReference[] editors = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getEditorReferences();
+		for (int i = 0; i < editors.length; i++) {
+			IEditorReference editor = editors[i];
+			uninstall(editor.getEditor(false));
+		}
+	}
+
+	public static void setEnabled(boolean enabled) {
+		TabKeyHandler.enabled = enabled;
+		if (enabled)
+			installForAll();
+		else
+			uninstallFromAll();
+	}
+
+	public static boolean isEnabled() {
+		return enabled;
 	}
 }

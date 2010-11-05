@@ -18,9 +18,8 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 	 */
 	public void initializeDefaultPreferences() {
 		IPreferenceStore store = EclipseZenCodingPlugin.getDefault().getPreferenceStore();
-		
+		store.setDefault(PreferenceConstants.P_TAB_EXPAND, true);
 		setupDefaultOutputProfiles();
-		
 	}
 	
 	private void setupDefaultOutputProfiles() {

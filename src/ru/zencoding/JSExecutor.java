@@ -90,7 +90,6 @@ public class JSExecutor {
 		if (fnObj instanceof Function) hasVariableFn = (Function) fnObj;
 		else return false;
 		
-		System.out.println("References cached");
 		return true;
 	}
 

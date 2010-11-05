@@ -5,15 +5,8 @@ package ru.zencoding.eclipse.preferences;
  */
 public class PreferenceConstants {
 
-	public static final String P_PATH = "pathPreference";
-
-	public static final String P_BOOLEAN = "booleanPreference";
-
-	public static final String P_CHOICE = "choicePreference";
-
-	public static final String P_STRING = "stringPreference";
+	public static final String P_TAB_EXPAND = "tabExpand";
 	
-	public static final String P_OUTPUT_PROFILE = "outputProfile";
 	public static final String P_FILTERS = "filters";
 	
 	public static final String P_PROFILE_TAG_CASE = "profileTagCase";

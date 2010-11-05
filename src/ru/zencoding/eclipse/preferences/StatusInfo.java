@@ -2,7 +2,8 @@ package ru.zencoding.eclipse.preferences;
 
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.IStatus;
-import org.eclipse.ui.internal.texteditor.TextEditorPlugin;
+
+import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 
 /**
  * A settable IStatus.
@@ -144,7 +145,7 @@ class StatusInfo implements IStatus {
 	 * @see IStatus#getPlugin()
 	 */
 	public String getPlugin() {
-		return TextEditorPlugin.PLUGIN_ID;
+		return EclipseZenCodingPlugin.PLUGIN_ID;
 	}
 
 	/**

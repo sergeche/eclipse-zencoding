@@ -4,6 +4,7 @@ import org.eclipse.jface.preference.*;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 import org.eclipse.ui.IWorkbench;
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
+import ru.zencoding.eclipse.TabKeyHandler;
 
 /**
  * This class represents a preference page that
@@ -26,7 +27,7 @@ public class EclipseZenCodingPreferencePage
 	public EclipseZenCodingPreferencePage() {
 		super(GRID);
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
-		setDescription("A demonstration of a preference page implementation");
+		setDescription("Common Zen Coding preferences");
 	}
 	
 	/**
@@ -36,29 +37,37 @@ public class EclipseZenCodingPreferencePage
 	 * restore itself.
 	 */
 	public void createFieldEditors() {
-		addField(new DirectoryFieldEditor(PreferenceConstants.P_PATH, 
-				"&Directory preference:", getFieldEditorParent()));
 		addField(
 			new BooleanFieldEditor(
-				PreferenceConstants.P_BOOLEAN,
-				"&An example of a boolean preference",
+				PreferenceConstants.P_TAB_EXPAND,
+				"&Expand abbreviations by Tab key",
 				getFieldEditorParent()));
-
-		addField(new RadioGroupFieldEditor(
-				PreferenceConstants.P_CHOICE,
-			"An example of a multiple-choice preference",
-			1,
-			new String[][] { { "&Choice 1", "choice1" }, {
-				"C&hoice 2", "choice2" }
-		}, getFieldEditorParent()));
-		addField(
-			new StringFieldEditor(PreferenceConstants.P_STRING, "A &text preference:", getFieldEditorParent()));
 	}
 
 	/* (non-Javadoc)
 	 * @see org.eclipse.ui.IWorkbenchPreferencePage#init(org.eclipse.ui.IWorkbench)
 	 */
 	public void init(IWorkbench workbench) {
+	}
+	
+	private void updatePreferences() {
+		IPreferenceStore store = EclipseZenCodingPlugin.getDefault().getPreferenceStore();
+		TabKeyHandler.setEnabled(store.getBoolean(PreferenceConstants.P_TAB_EXPAND));
+	}
+
+	@Override
+	public boolean performOk() {
+		boolean result = super.performOk();
+		if (result) {
+			updatePreferences();
+		}
+		return result;
+	}
+
+	@Override
+	protected void performDefaults() {
+		super.performDefaults();
+		updatePreferences();
 	}
 	
 }
