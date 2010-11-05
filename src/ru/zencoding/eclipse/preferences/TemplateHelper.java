@@ -14,6 +14,8 @@ import ru.zencoding.eclipse.ZenCodingContextType;
 public class TemplateHelper {
     /** The template store list. */
     private static HashMap<String, TemplateStore> fStoreList = new HashMap<String, TemplateStore>();
+    
+    private static TemplateStore fVariableStore;
 
     /** The context type registry. */
     private static ContributionContextTypeRegistry fRegistry;
@@ -44,6 +46,27 @@ public class TemplateHelper {
     	}
     	
         return fStoreList.get(type);
+    }
+    
+    /**
+     * Returns this plug-in's variable store.
+     * 
+     * @return the template store of this plug-in instance
+     */
+    public static TemplateStore getVariableStore() {
+    	if (fVariableStore == null) {
+    		fVariableStore = new ContributionTemplateStore(TemplateHelper.getVariableContextTypeRegistry(), 
+    				EclipseZenCodingPlugin.getDefault().getPreferenceStore(), CUSTOM_TEMPLATES_KEY + ".variable");
+    		try {
+    			fVariableStore .load();
+    		} catch (IOException e) {
+    			e.printStackTrace();
+    			throw new RuntimeException(e);
+    		}
+    		
+    	}
+    	
+    	return fVariableStore;
     }
 
     /**

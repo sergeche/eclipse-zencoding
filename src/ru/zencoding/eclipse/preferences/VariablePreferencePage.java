@@ -14,7 +14,6 @@ import org.eclipse.jface.dialogs.StatusDialog;
 import org.eclipse.jface.layout.TableColumnLayout;
 import org.eclipse.jface.preference.PreferencePage;
 import org.eclipse.jface.resource.JFaceResources;
-import org.eclipse.jface.text.templates.ContextTypeRegistry;
 import org.eclipse.jface.text.templates.Template;
 import org.eclipse.jface.text.templates.persistence.TemplatePersistenceData;
 import org.eclipse.jface.text.templates.persistence.TemplateStore;
@@ -321,8 +320,6 @@ public abstract class VariablePreferencePage extends PreferencePage implements
 	/** The store for our templates. */
 	private TemplateStore fTemplateStore;
 
-	private ContextTypeRegistry fContextTypeRegistry;
-	
 	/*
 	 * @see PreferencePage#createContents(Composite)
 	 */
@@ -607,14 +604,5 @@ public abstract class VariablePreferencePage extends PreferencePage implements
 		String title= "Error while saving variables";
 		String message= "Error occured while saving variable preverences";
 		MessageDialog.openError(getShell(), title, message);
-	}
-	
-	/**
-	 * Sets the context type registry.
-	 *
-	 * @param registry the new context type registry
-	 */
-	public void setContextTypeRegistry(ContextTypeRegistry registry) {
-		fContextTypeRegistry= registry;
 	}
 }

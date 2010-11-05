@@ -9,8 +9,7 @@ public class ZenCodingVariablesPreferencePage extends VariablePreferencePage
 	
 	public ZenCodingVariablesPreferencePage() {
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
-        setTemplateStore(TemplateHelper.getTemplateStore("variables"));
-        setContextTypeRegistry(TemplateHelper.getVariableContextTypeRegistry());
+        setTemplateStore(TemplateHelper.getVariableStore());
         setDescription("Variables for Zen Coding");
 	}
 
