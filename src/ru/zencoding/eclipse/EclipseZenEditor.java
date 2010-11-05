@@ -247,18 +247,26 @@ public class EclipseZenEditor implements IZenEditor {
 		ArrayList<Integer> carets = new ArrayList<Integer>();
 		
 		// find all carets
-		String[] chunks = text.split(Pattern.quote(getCaretPlaceholder()));
-		int offset = 0;
-		StringBuilder buf = new StringBuilder();
-		
-		if (chunks.length > 1) {
-			for (int i = 0; i < chunks.length - 1; i++) {
-				offset += chunks[i].length();
-				carets.add(offset);
-				buf.append(chunks[i]);
-			}
+		if (text.equals(getCaretPlaceholder())) {
+			carets.add(0);
+			text = "";
+		} else {
+			String[] chunks = text.split(Pattern.quote(getCaretPlaceholder()));
+			int offset = 0;
+			StringBuilder buf = new StringBuilder();
 			
-			text = buf.toString() + chunks[chunks.length - 1];
+			if (chunks.length > 1) {
+				for (int i = 0; i < chunks.length - 1; i++) {
+					offset += chunks[i].length();
+					carets.add(offset);
+					buf.append(chunks[i]);
+				}
+				
+				text = buf.toString() + chunks[chunks.length - 1];
+			} else if (chunks.length == 1) {
+				carets.add(0);
+				text = "";
+			}
 		}
 		
 		// now, process all tab-stops

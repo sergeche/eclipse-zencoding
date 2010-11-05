@@ -14,9 +14,59 @@
             id="ru.zencoding.eclipse.commands.expandAbbreviationCommand">
       </command>
       <command
-            name="Match Pair"
+            name="Match Pair Outward"
             categoryId="ru.zencoding.eclipse.commands.category"
-            id="ru.zencoding.eclipse.commands.matchPairCommand">
+            id="ru.zencoding.eclipse.commands.match_pair_outward">
+      </command>
+      <command
+            name="Match Pair Inward"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.match_pair_inward">
+      </command>
+      <command
+            name="Wrap With Abbreviation..."
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.wrap_with_abbreviation">
+      </command>
+      <command
+            name="Previous Edit Point"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.prev_edit_point">
+      </command>
+      <command
+            name="Next Edit Point"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.next_edit_point">
+      </command>
+      <command
+            name="Go to Matching Pair"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.matching_pair">
+      </command>
+      <command
+            name="Merge Lines"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.merge_lines">
+      </command>
+      <command
+            name="Toggle Comment"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.toggle_comment">
+      </command>
+      <command
+            name="Split/Join Tag"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.split_join_tag">
+      </command>
+      <command
+            name="Remove Tag"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.remove_tag">
+      </command>
+      <command
+            name="Encode/Decode Data:URL"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.encode_decode_data_url">
       </command>
    </extension>
    <extension
@@ -26,7 +76,47 @@
             class="ru.zencoding.eclipse.handlers.ExpandAbbreviationAction">
       </handler>
       <handler
-            commandId="ru.zencoding.eclipse.commands.matchPairCommand"
+            commandId="ru.zencoding.eclipse.commands.match_pair_outward"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.match_pair_inward"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
+            class="ru.zencoding.eclipse.handlers.WrapWithAbbreviationAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.prev_edit_point"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.next_edit_point"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.matching_pair"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.merge_lines"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.toggle_comment"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.split_join_tag"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.remove_tag"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
             class="ru.zencoding.eclipse.handlers.DefaultAction">
       </handler>
    </extension>
@@ -36,6 +126,54 @@
             commandId="ru.zencoding.eclipse.commands.expandAbbreviationCommand"
             contextId="org.eclipse.ui.textEditorScope"
             sequence="M1+E"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+M2+A"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.prev_edit_point"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M3+CTRL+["
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.next_edit_point"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M3+CTRL+]"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.merge_lines"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="CTRL+M"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.toggle_comment"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+M2+/"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.split_join_tag"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+U"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.remove_tag"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+M2+I"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M2+M3+I"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
       </key>
    </extension>
@@ -53,9 +191,59 @@
                   id="ru.zencoding.eclipse.menus.expandAbbreviationCommand">
             </command>
             <command
-                  commandId="ru.zencoding.eclipse.commands.matchPairCommand"
+                  commandId="ru.zencoding.eclipse.commands.match_pair_outward"
                   mnemonic="M"
-                  id="ru.zencoding.eclipse.menus.matchPairCommand">
+                  id="ru.zencoding.eclipse.menus.match_pair_outward">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.match_pair_inward"
+                  mnemonic="I"
+                  id="ru.zencoding.eclipse.menus.match_pair_outward">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
+                  mnemonic="W"
+                  id="ru.zencoding.eclipse.menus.wrap_with_abbreviation">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.prev_edit_point"
+                  mnemonic="P"
+                  id="ru.zencoding.eclipse.menus.prev_edit_point">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.next_edit_point"
+                  mnemonic="N"
+                  id="ru.zencoding.eclipse.menus.next_edit_point">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.matching_pair"
+                  mnemonic="G"
+                  id="ru.zencoding.eclipse.menus.matching_pair">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.merge_lines"
+                  mnemonic="R"
+                  id="ru.zencoding.eclipse.menus.merge_lines">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.toggle_comment"
+                  mnemonic="T"
+                  id="ru.zencoding.eclipse.menus.toggle_comment">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.split_join_tag"
+                  mnemonic="J"
+                  id="ru.zencoding.eclipse.menus.split_join_tag">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.remove_tag"
+                  mnemonic="V"
+                  id="ru.zencoding.eclipse.menus.remove_tag">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
+                  mnemonic="U"
+                  id="ru.zencoding.eclipse.menus.encode_decode_data_url">
             </command>
          </menu>
       </menuContribution>

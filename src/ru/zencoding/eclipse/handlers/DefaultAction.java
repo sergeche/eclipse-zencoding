@@ -9,8 +9,9 @@ public class DefaultAction extends AbstractHandler {
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
 		// ru.zencoding.eclipse.commands.matchPairCommand
-		System.out.println(event.getCommand().getId());
-		ActionRunner.getSingleton().run("match_pair_outward");
+		String commandId = event.getCommand().getId();
+		String commandName = commandId.substring(commandId.lastIndexOf('.') + 1);
+		ActionRunner.getSingleton().run(commandName);
 		return null;
 	}
 
