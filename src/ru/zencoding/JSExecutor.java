@@ -1,6 +1,5 @@
 package ru.zencoding;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -27,6 +26,11 @@ public class JSExecutor {
 	private Function addResourceFn;
 	private Function hasVariableFn;
 	private Function setupProfileFn;
+	private Function addVariableFn;
+	
+	protected static class NotAFunctionException extends Exception {
+		private static final long serialVersionUID = -1259543361680422950L;
+	}
 
 	private JSExecutor() {
 		inited = false;
@@ -36,8 +40,8 @@ public class JSExecutor {
 		if (input != null) {
 			try {
 				cx.evaluateReader(scope, input, getFilename(), 1, null);
-				inited = cachRefs();
-			} catch (IOException e) {
+				inited = cacheRefs();
+			} catch (Exception e) {
 				System.err.println(e.getMessage());
 			}
 		} else {
@@ -73,31 +77,27 @@ public class JSExecutor {
 	/**
 	 * Caches references to JavaScript functions
 	 * @return
+	 * @throws NotAFunctionException 
 	 */
-	private boolean cachRefs() {
-		Object fnObj;
-		fnObj = scope.get("runZenCodingAction", scope);
-		if (fnObj instanceof Function) runActionFn = (Function) fnObj;
-		else return false;
-		
-		fnObj = scope.get("resetUserSettings", scope);
-		if (fnObj instanceof Function) resetVarsFn = (Function) fnObj;
-		else return false;
-		
-		fnObj = scope.get("addUserResource", scope);
-		if (fnObj instanceof Function) addResourceFn = (Function) fnObj;
-		else return false;
-		
-		fnObj = scope.get("hasZenCodingVariable", scope);
-		if (fnObj instanceof Function) hasVariableFn = (Function) fnObj;
-		else return false;
-		
-		fnObj = scope.get("setupOutputProfile", scope);
-		if (fnObj instanceof Function) setupProfileFn = (Function) fnObj;
-		else return false;
+	private boolean cacheRefs() throws NotAFunctionException {
+		runActionFn = getFunction("runZenCodingAction");
+		resetVarsFn = getFunction("resetUserSettings");
+		addResourceFn = getFunction("addUserResource");
+		hasVariableFn = getFunction("hasZenCodingVariable");
+		setupProfileFn = getFunction("setupOutputProfile");
+		addVariableFn = getFunction("addUserVariable");
 		
 		return true;
 	}
+	
+	private Function getFunction(String name) throws NotAFunctionException {
+		Object fnObj = scope.get(name, scope);
+		if (fnObj instanceof Function) 
+			return (Function) fnObj;
+		else 
+			throw new NotAFunctionException();
+	}
+	
 
 	
 	public boolean isInited() {
@@ -145,6 +145,7 @@ public class JSExecutor {
 			resetVarsFn.call(cx, scope, scope, null);
 			saveSettings("abbreviations");
 			saveSettings("snippets");
+			saveVariables();
 		}
 	}
 	
@@ -157,6 +158,15 @@ public class JSExecutor {
 			Object fnArgs[] = {syntax, type, template.getName(),
 					EclipseTemplateProcessor.process(template.getPattern())};
 			addResourceFn.call(cx, scope, scope, fnArgs);
+		}
+	}
+	
+	private void saveVariables() {
+		TemplateStore storage = TemplateHelper.getVariableStore();
+		Template[] templates = storage.getTemplates();
+		for (Template template : templates) {
+			Object fnArgs[] = {template.getName(), EclipseTemplateProcessor.process(template.getPattern())};
+			addVariableFn.call(cx, scope, scope, fnArgs);
 		}
 	}
 	

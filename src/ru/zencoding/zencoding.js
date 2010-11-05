@@ -740,7 +740,8 @@ var zen_settings = {
 		
 		caret_placeholder = '{%::zen-caret::%}',
 		newline = '\n',
-		default_tag = 'div';
+		default_tag = 'div',
+		user_variables = {};
 		
 	var default_profile = {
 		tag_case: 'lower',
@@ -760,7 +761,10 @@ var zen_settings = {
 		inline_break: 3,
 		
 		// use self-closing style for writing empty elements, e.g. <br /> or <br>
-		self_closing_tag: 'xhtml'
+		self_closing_tag: 'xhtml',
+		
+		// Profile-level output filters, re-defines syntax filters 
+		filters: ''
 	};
 	
 	var profiles = {};
@@ -954,10 +958,19 @@ var zen_settings = {
 	 * @return {String}
 	 */
 	function replaceVariables(str, vars) {
-		vars = vars || zen_settings.variables;
-		return str.replace(/\$\{([\w\-]+)\}/g, function(str, p1){
-			return (p1 in vars) ? vars[p1] : str;
-		});
+		var callback;
+		
+		if (vars)
+			callback = function(str, p1) {
+				return (p1 in vars) ? vars[p1] : str;
+			};
+		else 
+			callback = function(str, p1) {
+				var v = getVariable(p1);
+				return (v !== null && typeof v != 'undefined') ? v : str;
+			}
+		
+		return str.replace(/\$\{([\w\-]+)\}/g, callback);
 	}
 	
 	/**
@@ -968,7 +981,6 @@ var zen_settings = {
 	 * @param {String} type Tag type (html, xml)
 	 */
 	function Tag(name, count, type) {
-		name = name.toLowerCase();
 		type = type || 'html';
 		
 		var abbr = getAbbreviation(type, name);
@@ -1116,7 +1128,9 @@ var zen_settings = {
 	 * @return {String}
 	 */
 	function getVariable(name) {
-		return zen_settings.variables[name];
+		return (name in user_variables)
+			? user_variables[name]
+			: zen_settings.variables[name];
 	}
 	
 	/**
@@ -1628,12 +1642,8 @@ var zen_settings = {
 	 * @return {ZenNode}
 	 */
 	function runFilters(tree, profile, filter_list) {
-		if (typeof(profile) == 'string' && profile in profiles)
-			profile = profiles[profile];
+		profile = processProfile(profile);
 		
-		if (!profile)
-			profile = profiles['plain'];
-			
 		if (typeof(filter_list) == 'string')
 			filter_list = filter_list.split(/[\|,]/g);
 			
@@ -1815,6 +1825,20 @@ var zen_settings = {
 		}
 		
 		return str;
+	}
+	
+	/**
+	 * Porcesses profile argument, returning, if possible, profile object
+	 */
+	function processProfile(profile) {
+		var _profile = profile;
+		if (typeof(profile) == 'string' && profile in profiles)
+			_profile = profiles[profile];
+		
+		if (!_profile)
+			_profile = profiles['plain'];
+			
+		return _profile;
 	}
 	
 	// create default profiles
@@ -2074,8 +2098,11 @@ var zen_settings = {
 		 * 
 		 * @return {ZenNode}
 		 */
-		applyFilters: function(tree, syntax, profile, additional_filters){
-			var _filters = getResource(syntax, 'filters') || basic_filters;
+		applyFilters: function(tree, syntax, profile, additional_filters) {
+			profile = processProfile(profile);
+			var _filters = profile.filters;
+			if (!_filters)
+				_filters = getResource(syntax, 'filters') || basic_filters;
 				
 			if (additional_filters)
 				_filters += '|' + ((typeof(additional_filters) == 'string') 
@@ -2094,8 +2121,16 @@ var zen_settings = {
 		repeatString: repeatString,
 		getVariable: getVariable,
 		setVariable: function(name, value) {
-			zen_settings.variables[name] = value;
+			user_variables[name] = value;
 		},
+		
+		/**
+		 * Removes all user-defined variables
+		 */
+		resetVariables: function() {
+			user_variables = {};
+		},
+		
 		replaceVariables: replaceVariables,
 		
 		/**
@@ -4003,6 +4038,22 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 (function(){
 	var child_token = '${child}',
 		tabstops = 0;
+		
+	/**
+	 * Returns proper string case, depending on profile value
+	 * @param {String} val String to process
+	 * @param {String} case_param Profile's case value ('lower', 'upper', 'leave')
+	 */
+	function processStringCase(val, case_param) {
+		switch (String(case_param || '').toLowerCase()) {
+			case 'lower':
+				return val.toLowerCase();
+			case 'upper':
+				return val.toUpperCase();
+		}
+		
+		return val;
+	}
 	
 	/**
 	 * Creates HTML attributes string from tag according to profile settings
@@ -4018,7 +4069,7 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 			
 		for (var i = 0; i < tag.attributes.length; i++) {
 			var a = tag.attributes[i];
-			attr_name = (profile.attr_case == 'upper') ? a.name.toUpperCase() : a.name.toLowerCase();
+			attr_name = processStringCase(a.name, profile.attr_case);
 			attrs += ' ' + attr_name + '=' + attr_quote + (a.value || cursor) + attr_quote;
 		}
 		
@@ -4084,7 +4135,7 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 			self_closing = '/';
 			
 		// define opening and closing tags
-		var tag_name = (profile.tag_case == 'upper') ? item.name.toUpperCase() : item.name.toLowerCase();
+		var tag_name = processStringCase(item.name, profile.tag_case);
 		if (is_unary) {
 			start = '<' + tag_name + attrs + self_closing + '>';
 			item.end = '';
@@ -4189,6 +4240,7 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 	for (var i = 2, il = arguments.length; i < il; i++) {
 		args.push(arguments[i]);
 	}
+	
 	return zen_coding.runAction(action_name, args);
 }
 
@@ -4198,6 +4250,7 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
 function resetUserSettings() {
 	delete zen_coding.user_resources;
 	zen_coding.user_resources = {};
+	zen_coding.resetVariables();
 }
 
 /**
@@ -4230,17 +4283,22 @@ function hasZenCodingVariable(name) {
 	return !!zen_coding.getVariable(name);
 }
 
+
 function tryBoolean(val) {
-	var str_val = String(val).toLowerCase();
+	var str_val = String(val || '').toLowerCase();
 	if (str_val == 'true')
 		return true;
 	if (str_val == 'false')
 		return false;
+		
+	var int_val = parseInt(str_val, 10);
+	if (!isNaN(int_val))
+		return int_val;
 	
-	return val;
+	return str_val;
 }
 
-function setupOutputProfile(name, profile_obj) {
+function setupOutputProfile(name, profile_obj, editor) {
 	var map = {
 		tag_case: 'getTagCase',
 		attr_case: 'getAttrCase',
@@ -4249,15 +4307,21 @@ function setupOutputProfile(name, profile_obj) {
 		place_cursor: 'isPlaceCaret',
 		indent: 'isIndentTags',
 		inline_break: 'getInlineBreak',
-		self_closing_tag: 'getSelfClosing'
+		self_closing_tag: 'getSelfClosing',
+		filters: 'getFilters'
 	};
 	
+	name = String(name);
+	
 	var profile = {}, val;
+		
 	for (var p in map) if (map.hasOwnProperty(p)) {
-		val = profile_obj[map[p]]();
-		if (val !== '' && val !== null)
-			profile[p] = tryBoolean(val);
+		profile[p] = tryBoolean(profile_obj[map[p]]());
 	}
 	
 	zen_coding.setupProfile(name, profile);
+}
+
+function addUserVariable(name, value) {
+	zen_coding.setVariable(name, value);
 }

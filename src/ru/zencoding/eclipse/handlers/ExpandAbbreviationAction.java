@@ -40,7 +40,6 @@ public class ExpandAbbreviationAction extends AbstractHandler {
 				// setup output profile
 				String syntax = editor.getSyntax();
 				
-				System.out.print("Current syntax: " + syntax);
 				OutputProfile profile = OutputProfile.createFromPreferences(syntax);
 				js.setupProfile(profileName, profile);
 				

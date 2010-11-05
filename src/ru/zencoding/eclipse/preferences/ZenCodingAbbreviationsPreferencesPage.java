@@ -32,4 +32,10 @@ public class ZenCodingAbbreviationsPreferencesPage extends TemplatePreferencePag
 		JSExecutor.getSingleton().reloadUserSettings();
 		return super.performOk();
 	}
+	
+	@Override
+	protected void performDefaults() {
+		super.performDefaults();
+		JSExecutor.getSingleton().reloadUserSettings();
+	}
 }

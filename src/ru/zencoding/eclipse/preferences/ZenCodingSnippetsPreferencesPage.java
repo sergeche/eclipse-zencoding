@@ -27,4 +27,10 @@ public class ZenCodingSnippetsPreferencesPage extends TemplatePreferencePage
 		JSExecutor.getSingleton().reloadUserSettings();
 		return super.performOk();
 	}
+	
+	@Override
+	protected void performDefaults() {
+		super.performDefaults();
+		JSExecutor.getSingleton().reloadUserSettings();
+	}
 }
