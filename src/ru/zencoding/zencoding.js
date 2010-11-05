@@ -4185,7 +4185,11 @@ zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
  * @param {String} action_name
  * @return {Boolean}
  */function runZenCodingAction(editor, action_name){
-	return zen_coding.runAction(action_name, editor);
+	var args = [editor];
+	for (var i = 2, il = arguments.length; i < il; i++) {
+		args.push(arguments[i]);
+	}
+	return zen_coding.runAction(action_name, args);
 }
 
 /**
@@ -4224,4 +4228,36 @@ function addUserResource(syntax, type, abbr, value) {
 
 function hasZenCodingVariable(name) {
 	return !!zen_coding.getVariable(name);
+}
+
+function tryBoolean(val) {
+	var str_val = String(val).toLowerCase();
+	if (str_val == 'true')
+		return true;
+	if (str_val == 'false')
+		return false;
+	
+	return val;
+}
+
+function setupOutputProfile(name, profile_obj) {
+	var map = {
+		tag_case: 'getTagCase',
+		attr_case: 'getAttrCase',
+		attr_quotes: 'getAttrQuotes',
+		tag_nl: 'getTagNewline',
+		place_cursor: 'isPlaceCaret',
+		indent: 'isIndentTags',
+		inline_break: 'getInlineBreak',
+		self_closing_tag: 'getSelfClosing'
+	};
+	
+	var profile = {}, val;
+	for (var p in map) if (map.hasOwnProperty(p)) {
+		val = profile_obj[map[p]]();
+		if (val !== '' && val !== null)
+			profile[p] = tryBoolean(val);
+	}
+	
+	zen_coding.setupProfile(name, profile);
 }

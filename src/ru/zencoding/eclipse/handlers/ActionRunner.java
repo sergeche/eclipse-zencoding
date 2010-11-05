@@ -34,17 +34,25 @@ public class ActionRunner {
 	 * @return
 	 */
 	public boolean run(String actionName) {
-		IEditorPart editor = EclipseZenCodingHelper.getActiveEditor();
+		EclipseZenEditor editor = getEditor();
 		if (editor != null) {
 			try {
-				zenEditor.setContext(editor);
-				return js.runAction(zenEditor, actionName);
+				return js.runAction(editor, actionName);
 			} catch (Exception e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
 		
 		return false;
+	}
+	
+	public EclipseZenEditor getEditor() {
+		IEditorPart editor = EclipseZenCodingHelper.getActiveEditor();
+		if (editor != null) {
+			zenEditor.setContext(editor);
+			return zenEditor;
+		}
+		
+		return null;
 	}
 }

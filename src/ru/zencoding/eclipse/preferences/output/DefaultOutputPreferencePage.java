@@ -9,6 +9,7 @@ import org.eclipse.ui.IWorkbenchPreferencePage;
 
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 import ru.zencoding.eclipse.preferences.PreferenceConstants;
+import ru.zencoding.eclipse.preferences.PreferenceInitializer;
 import ru.zencoding.eclipse.preferences.SpacerFieldEditor;
 import ru.zencoding.eclipse.preferences.SpinnerFieldEditor;
 
@@ -25,7 +26,7 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 	}
 	
 	public String getPrefName(String prefix) {
-		return prefix + "_" + getPrefSuffix();
+		return PreferenceInitializer.getPrefName(prefix, getPrefSuffix());
 	}
 	
 	/* (non-Javadoc)

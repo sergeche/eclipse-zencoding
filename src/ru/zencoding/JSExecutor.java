@@ -12,6 +12,7 @@ import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
 
 import ru.zencoding.eclipse.preferences.TemplateHelper;
+import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
 public class JSExecutor {
 	private volatile static JSExecutor singleton;
@@ -25,6 +26,7 @@ public class JSExecutor {
 	private Function resetVarsFn;
 	private Function addResourceFn;
 	private Function hasVariableFn;
+	private Function setupProfileFn;
 
 	private JSExecutor() {
 		inited = false;
@@ -90,6 +92,10 @@ public class JSExecutor {
 		if (fnObj instanceof Function) hasVariableFn = (Function) fnObj;
 		else return false;
 		
+		fnObj = scope.get("setupOutputProfile", scope);
+		if (fnObj instanceof Function) setupProfileFn = (Function) fnObj;
+		else return false;
+		
 		return true;
 	}
 
@@ -103,14 +109,31 @@ public class JSExecutor {
 	 * @return 'True' if action was successfully executed
 	 */
 	public boolean runAction(IZenEditor editor, String actionName) {
+		return runAction(editor, new Object[] {actionName});
+	}
+	
+	/**
+	 * Runs Zen Coding script on passed editor object
+	 * @return 'True' if action was successfully executed
+	 */
+	public boolean runAction(IZenEditor editor, Object[] args) {
 		if (isInited()) {
-			Object wrappedEditor = Context.javaToJS(editor, scope);
-			Object fnArgs[] = {wrappedEditor, actionName};
+			Object fnArgs[] = new Object[args.length + 1];
+			fnArgs[0] = convertJavaToJs(editor);
+			
+			for (int i = 0; i < args.length; i++) {
+				fnArgs[i + 1] = args[i];
+			}
+			
 			Object result = runActionFn.call(cx, scope, scope, fnArgs);
 			return Context.toBoolean(result);
 		}
 		
 		return false;
+	}
+	
+	public Object convertJavaToJs(Object arg) {
+		return Context.javaToJS(arg, scope);
 	}
 	
 	/**
@@ -135,6 +158,10 @@ public class JSExecutor {
 					EclipseTemplateProcessor.process(template.getPattern())};
 			addResourceFn.call(cx, scope, scope, fnArgs);
 		}
+	}
+	
+	public void setupProfile(String name, OutputProfile profile) {
+		setupProfileFn.call(cx, scope, scope, new Object[] {name, convertJavaToJs(profile)});
 	}
 	
 	/**

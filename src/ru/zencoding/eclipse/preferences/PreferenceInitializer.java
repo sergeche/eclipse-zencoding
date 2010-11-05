@@ -28,8 +28,8 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 		OutputProfile xml = new OutputProfile();
 		xml.setTagCase(OutputProfile.LEAVE);
 		xml.setAttrCase(OutputProfile.LEAVE);
+		xml.setTagNewline(OutputProfile.TRUE);
 		xml.setSelfClosing(OutputProfile.TRUE);
-		
 		
 		setupOutputPrefrences("default", html);
 		setupOutputPrefrences("html", html);
@@ -57,7 +57,7 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 		store.setDefault(getPrefName(PreferenceConstants.P_FILTERS, suffix), profile.getFilters());
 	}
 	
-	private String getPrefName(String prefix, String suffix) {
+	public static String getPrefName(String prefix, String suffix) {
 		return prefix + "_" + suffix;
 	}
 

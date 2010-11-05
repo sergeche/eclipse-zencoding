@@ -4,6 +4,10 @@ import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
 
+import ru.zencoding.JSExecutor;
+import ru.zencoding.eclipse.EclipseZenEditor;
+import ru.zencoding.eclipse.preferences.output.OutputProfile;
+
 /**
  * Our sample handler extends AbstractHandler, an IHandler base class.
  * @see org.eclipse.core.commands.IHandler
@@ -21,7 +25,34 @@ public class ExpandAbbreviationAction extends AbstractHandler {
 	 * from the application context.
 	 */
 	public Object execute(ExecutionEvent event) throws ExecutionException {
-		ActionRunner.getSingleton().run("expand_abbreviation");
+		expand();
 		return null;
+	}
+	
+	public static boolean expand() {
+		ActionRunner runner = ActionRunner.getSingleton();
+		EclipseZenEditor editor = runner.getEditor();
+		JSExecutor js = JSExecutor.getSingleton();
+		String profileName = "eclipse";
+		
+		if (editor != null) {
+			try {
+				// setup output profile
+				String syntax = editor.getSyntax();
+				
+				System.out.print("Current syntax: " + syntax);
+				OutputProfile profile = OutputProfile.createFromPreferences(syntax);
+				js.setupProfile(profileName, profile);
+				
+				// expand abbreviation with current profile
+				return js.runAction(editor, new Object[]{"expand_abbreviation", syntax, profileName});
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+		}
+		
+		return false;
 	}
 }

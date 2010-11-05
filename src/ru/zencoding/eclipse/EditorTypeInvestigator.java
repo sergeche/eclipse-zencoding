@@ -1,5 +1,7 @@
 package ru.zencoding.eclipse;
 
+import org.eclipse.ui.PlatformUI;
+
 
 /**
  * Tries to investigate editor's type and syntax profile
@@ -7,8 +9,6 @@ package ru.zencoding.eclipse;
  *
  */
 public class EditorTypeInvestigator {
-	private volatile static EditorTypeInvestigator singleton;
-	
 	public static String TYPE_HTML = "html";
 	public static String TYPE_XML = "xml";
 	public static String TYPE_CSS = "css";
@@ -23,29 +23,22 @@ public class EditorTypeInvestigator {
 		
 	}
 	
-	public static EditorTypeInvestigator getSingleton() {
-		if (singleton == null) {
-			synchronized (EditorTypeInvestigator.class) {
-				if (singleton == null)
-					singleton = new EditorTypeInvestigator();
-			}
-		}
-		return singleton;
-	}
-	
 	/**
 	 * Returns current editor's syntax mode
 	 */
-	public String getSyntax(EclipseZenEditor editor) {
-		String className = editor.getEditor().getClass().getName().toLowerCase();
+	public static String getSyntax(EclipseZenEditor editor) {
+		// we need current editor, not the text one, because of multi-page editors
+		String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
 		
-		if (className.indexOf("xsleditor") != -1)
+		if (className.indexOf("xml") != -1)
+			return TYPE_XML;
+		else if (className.indexOf("xsleditor") != -1)
 			return TYPE_XSL;
 		else if (className.indexOf("hamleditor") != -1)
 			return TYPE_HAML;
 		else if (className.indexOf("sasseditor") != -1)
 			return TYPE_CSS;
-		else if (className.indexOf(".css.") != -1)
+		else if (className.indexOf("css") != -1)
 			return TYPE_CSS;
 		else 
 			return TYPE_HTML;
@@ -54,7 +47,7 @@ public class EditorTypeInvestigator {
 	/**
 	 * Returns current output profile name (@see zen_coding#setupProfile)
 	 */
-	public String getOutputProfile(EclipseZenEditor editor) {
+	public static String getOutputProfile(EclipseZenEditor editor) {
 		String syntax = getSyntax(editor);
 		if (syntax.equals(TYPE_XML) || syntax.equals(TYPE_XSL))
 			return PROFILE_XML;

@@ -338,12 +338,12 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public String getSyntax() {
-		return EditorTypeInvestigator.getSingleton().getSyntax(this);
+		return EditorTypeInvestigator.getSyntax(this);
 	}
 
 	@Override
 	public String getProfileName() {
-		return EditorTypeInvestigator.getSingleton().getOutputProfile(this);
+		return EditorTypeInvestigator.getOutputProfile(this);
 	}
 
 	@Override

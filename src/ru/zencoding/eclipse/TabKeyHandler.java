@@ -16,7 +16,7 @@ import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.texteditor.AbstractTextEditor;
 
-import ru.zencoding.eclipse.handlers.ActionRunner;
+import ru.zencoding.eclipse.handlers.ExpandAbbreviationAction;
 
 /**
  * Handles Tab key press
@@ -117,8 +117,7 @@ public class TabKeyHandler {
 						return;
 					}
 					
-					if (event.doit && event.keyCode == 9 
-							&& ActionRunner.getSingleton().run("expand_abbreviation")) {
+					if (event.doit && event.keyCode == 9 && ExpandAbbreviationAction.expand()) {
 						event.doit = false; // cancel the event
 					}
 				}
