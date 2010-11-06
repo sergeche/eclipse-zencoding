@@ -2,6 +2,7 @@ package ru.zencoding.eclipse;
 
 import java.util.HashMap;
 
+import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.link.LinkedModeModel;
@@ -17,6 +18,7 @@ import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.texteditor.AbstractTextEditor;
 
 import ru.zencoding.eclipse.handlers.ExpandAbbreviationAction;
+import ru.zencoding.eclipse.preferences.PreferenceConstants;
 
 /**
  * Handles Tab key press
@@ -134,6 +136,11 @@ public class TabKeyHandler {
 	public static void setup(IWorkbenchPage page) {
 		if (!inited) {
 			inited = true;
+			
+			// get user preference
+			IPreferenceStore store = EclipseZenCodingPlugin.getDefault().getPreferenceStore();
+			setEnabled(store.getBoolean(PreferenceConstants.P_TAB_EXPAND));
+			
 			page.addPartListener(new IPartListener() {
 				
 				@Override
