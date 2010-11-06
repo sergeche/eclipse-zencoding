@@ -9,7 +9,9 @@ import org.eclipse.jface.text.templates.persistence.TemplateStore;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
+import org.mozilla.javascript.ScriptableObject;
 
+import ru.zencoding.eclipse.EclipseZenFile;
 import ru.zencoding.eclipse.preferences.TemplateHelper;
 import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
@@ -40,6 +42,8 @@ public class JSExecutor {
 		if (input != null) {
 			try {
 				cx.evaluateReader(scope, input, getFilename(), 1, null);
+				Object zenFile = Context.javaToJS(new EclipseZenFile(), scope);
+				ScriptableObject.putProperty(scope, "zen_file", zenFile);
 				inited = cacheRefs();
 			} catch (Exception e) {
 				System.err.println(e.getMessage());
