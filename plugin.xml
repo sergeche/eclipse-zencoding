@@ -129,6 +129,18 @@
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
       </key>
       <key
+            commandId="ru.zencoding.eclipse.commands.match_pair_outward"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+D"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.match_pair_inward"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+M2+D"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
+      <key
             commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
             contextId="org.eclipse.ui.textEditorScope"
             sequence="M1+M2+A"
