@@ -49,6 +49,7 @@ public class EclipseZenEditor implements IZenEditor {
 	public void setContext(IEditorPart editor) {
 		this.editor = editor;
 		doc = EclipseZenCodingHelper.getDocument(editor);
+		System.out.println("Document is " + doc);
 	}
 	
 	public boolean isValid() {
@@ -165,6 +166,10 @@ public class EclipseZenEditor implements IZenEditor {
 				model.forceInstall();
 				
 				LinkedModeUI linkUI = new LinkedModeUI(model, viewer);
+				
+				// Aptana has a buggy linked mode implementation, use simple 
+				// mode for it 
+				linkUI.setSimpleMode(isApatana());
 				linkUI.enter();
 			} else {
 				setCaretPos(start + firstTabStop.getStart());
@@ -414,6 +419,10 @@ public class EclipseZenEditor implements IZenEditor {
 
 	public String getCaretPlaceholder() {
 		return caretPlaceholder;
+	}
+	
+	public boolean isApatana() {
+		return getEditor().toString().toLowerCase().indexOf(".aptana.") != -1;
 	}
 	
 	public void print(String msg) {

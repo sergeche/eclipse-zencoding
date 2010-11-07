@@ -6,6 +6,7 @@ import org.eclipse.core.commands.ExecutionException;
 
 import ru.zencoding.JSExecutor;
 import ru.zencoding.eclipse.EclipseZenEditor;
+import ru.zencoding.eclipse.TabKeyHandler;
 import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
 /**
@@ -42,6 +43,9 @@ public class ExpandAbbreviationAction extends AbstractHandler {
 				
 				OutputProfile profile = OutputProfile.createFromPreferences(syntax);
 				js.setupProfile(profileName, profile);
+				
+				// force tab key handler installation
+				TabKeyHandler.install(editor.getEditor());
 				
 				// expand abbreviation with current profile
 				return js.runAction(editor, new Object[]{"expand_abbreviation", syntax, profileName});

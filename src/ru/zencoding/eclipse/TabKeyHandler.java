@@ -16,6 +16,7 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.texteditor.AbstractTextEditor;
+import org.eclipse.ui.texteditor.ITextEditor;
 
 import ru.zencoding.eclipse.handlers.ExpandAbbreviationAction;
 import ru.zencoding.eclipse.preferences.PreferenceConstants;
@@ -26,7 +27,7 @@ import ru.zencoding.eclipse.preferences.PreferenceConstants;
  *
  */
 public class TabKeyHandler {
-	private static HashMap<Integer, AbstractTextEditor> installedEditors = new HashMap<Integer, AbstractTextEditor>();
+	private static HashMap<Integer, ITextEditor> installedEditors = new HashMap<Integer, ITextEditor>();
 	private static HashMap<Integer, VerifyKeyListener> keyListeners = new HashMap<Integer, VerifyKeyListener>();
 	private static boolean inited = false;
 	private static boolean enabled = true;
@@ -36,18 +37,18 @@ public class TabKeyHandler {
 	 */
 	public static void install(IWorkbenchPart part) {
 		IEditorPart editor;
-		if (part instanceof IEditorPart) {
+		if (isEnabled() && part instanceof IEditorPart) {
 			editor = EclipseZenCodingHelper.getTextEditor((IEditorPart) part);
-			if (editor instanceof AbstractTextEditor)
-				install((AbstractTextEditor) editor);
+			if (editor instanceof ITextEditor)
+				install((ITextEditor) editor);
 		}
 	}
 	
 	/**
 	 * Tries to install key listener on editor's widget
 	 */
-	public static void install(AbstractTextEditor editor) {
-		if (editor == null)
+	public static void install(ITextEditor editor) {
+		if (editor == null || !isEnabled()) 
 			return;
 		
 		Integer id = getEditorId(editor);
@@ -99,11 +100,11 @@ public class TabKeyHandler {
 	 * @param editor
 	 * @return
 	 */
-	public static Integer getEditorId(AbstractTextEditor editor) {
+	public static Integer getEditorId(ITextEditor editor) {
 		return editor.hashCode();
 	}
 	
-	public static VerifyKeyListener getKeyListener(final AbstractTextEditor editor) {
+	public static VerifyKeyListener getKeyListener(final ITextEditor editor) {
 		Integer id = getEditorId(editor);
 		if (!keyListeners.containsKey(id)) {
 			keyListeners.put(id, new VerifyKeyListener() {

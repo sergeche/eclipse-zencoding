@@ -21,6 +21,7 @@ import org.eclipse.ui.part.MultiPageEditorPart;
 import org.eclipse.ui.texteditor.AbstractTextEditor;
 import org.eclipse.ui.texteditor.DocumentProviderRegistry;
 import org.eclipse.ui.texteditor.IDocumentProvider;
+import org.eclipse.ui.texteditor.ITextEditor;
 
 /**
  * Helper object that provides some commonly used functions for Zen Coding.
@@ -50,11 +51,12 @@ public class EclipseZenCodingHelper {
 	public static IEditorPart getTextEditor(IEditorPart editor) {
 		if (editor instanceof MultiPageEditorPart) {
 			Object currentPage = ((MultiPageEditorPart) editor).getSelectedPage();
-			if (currentPage instanceof AbstractTextEditor)
-				editor = (AbstractTextEditor) currentPage;
+			if (currentPage instanceof ITextEditor)
+				editor = (ITextEditor) currentPage;
 			else
 				editor = null;
 		}
+		
 		return editor;
 	}
 	
@@ -65,8 +67,8 @@ public class EclipseZenCodingHelper {
 	public static IDocument getDocument(IEditorPart editor) {
 		if (editor != null) {
 			IDocumentProvider dp = null;
-			if (editor instanceof AbstractTextEditor)
-				dp = ((AbstractTextEditor) editor).getDocumentProvider();
+			if (editor instanceof ITextEditor)
+				dp = ((ITextEditor) editor).getDocumentProvider();
 			
 			if (dp == null)
 				dp = DocumentProviderRegistry.getDefault().getDocumentProvider(editor.getEditorInput());
@@ -78,20 +80,28 @@ public class EclipseZenCodingHelper {
 		return null;
 	}
 	
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public static ITextViewer getTextViewer(IEditorPart editor) {
 		Field svField;
+		ITextViewer viewer = null;
 		
 		if (editor instanceof AbstractTextEditor) {
 			try {
 				svField = AbstractTextEditor.class.getDeclaredField("fSourceViewer");
 				svField.setAccessible(true);
-				return (ITextViewer) svField.get((AbstractTextEditor) editor);
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
+				viewer = (ITextViewer) svField.get((AbstractTextEditor) editor);
+			} catch (Exception e) {	}
 		}
 		
-		return null;
+		if (viewer == null) {
+			Class editorClass = editor.getClass();
+			try {
+				Method getViewer = editorClass.getMethod("getViewer", null);
+				viewer = (ITextViewer) getViewer.invoke(editor);
+			} catch (Exception e) {	}
+		}
+		
+		return viewer;
 	}
 	
 	/**
