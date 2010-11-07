@@ -68,6 +68,11 @@
             categoryId="ru.zencoding.eclipse.commands.category"
             id="ru.zencoding.eclipse.commands.encode_decode_data_url">
       </command>
+      <command
+            name="Update Image Size"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.update_image_size">
+      </command>
    </extension>
    <extension
          point="org.eclipse.ui.handlers">
@@ -117,6 +122,10 @@
       </handler>
       <handler
             commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.update_image_size"
             class="ru.zencoding.eclipse.handlers.DefaultAction">
       </handler>
    </extension>
@@ -188,6 +197,12 @@
             sequence="M2+M3+I"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
       </key>
+      <key
+            commandId="ru.zencoding.eclipse.commands.update_image_size"
+            contextId="org.eclipse.ui.textEditorScope"
+            sequence="M1+M2+U"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
+      </key>
    </extension>
    <extension
          point="org.eclipse.ui.menus">
@@ -256,6 +271,11 @@
                   commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
                   mnemonic="U"
                   id="ru.zencoding.eclipse.menus.encode_decode_data_url">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.update_image_size"
+                  mnemonic="Z"
+                  id="ru.zencoding.eclipse.menus.update_image_size">
             </command>
          </menu>
       </menuContribution>

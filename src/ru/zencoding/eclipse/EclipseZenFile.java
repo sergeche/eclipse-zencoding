@@ -34,7 +34,7 @@ public class EclipseZenFile implements IZenFile {
 	@Override
 	public String locateFile(String editorFile, String fileName) {
 		File f = new File(editorFile);
-		String result = "";
+		String result = null;
 		File tmp;
 			
 		// traverse upwards to find image uri
@@ -90,6 +90,11 @@ public class EclipseZenFile implements IZenFile {
 				f.createNewFile();
 			
 			stream = new FileOutputStream(file);
+			
+			for (int i = 0; i < content.length(); i++) {
+				stream.write(content.codePointAt(i));
+			}
+			
 			stream.write(content.getBytes());
 			stream.flush();
 			stream.close();
@@ -100,7 +105,11 @@ public class EclipseZenFile implements IZenFile {
 
 	@Override
 	public String getExt(String file) {
-		return file.substring(file.lastIndexOf('.')).toLowerCase();
+		int ix = file.lastIndexOf('.');
+		if (ix != -1) {
+			return file.substring(ix + 1).toLowerCase();
+		} else {
+			return "";
+		}
 	}
-
 }

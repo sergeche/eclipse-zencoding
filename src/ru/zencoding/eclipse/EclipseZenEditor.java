@@ -5,7 +5,6 @@ import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.eclipse.core.resources.IFile;
 import org.eclipse.jface.dialogs.InputDialog;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.IDocument;
@@ -263,9 +262,6 @@ public class EclipseZenEditor implements IZenEditor {
 				}
 				
 				text = buf.toString() + chunks[chunks.length - 1];
-			} else if (chunks.length == 1) {
-				carets.add(0);
-				text = "";
 			}
 		}
 		
@@ -405,13 +401,7 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public String getFilePath() {
-		IFile file = (IFile) editor.getEditorInput().getAdapter(IFile.class);
-		String path = "";
-		if (file != null) {
-			path = file.getLocation().makeAbsolute().toOSString();
-		}
-		
-		return path;
+		return EclipseZenCodingHelper.getURI(editor).substring(5);
 	}
 	
 	public IEditorPart getEditor() {
