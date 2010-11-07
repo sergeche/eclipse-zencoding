@@ -24,7 +24,7 @@ Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other struc
 h2. Installation
 
 # Go to _Help > Install New Software..._ in your Eclipse IDE
-# Add "http://zen-coding.ru/eclipse/updates/":http://zen-coding.ru/eclipse/updates/ in update sites
+# Add -"http://zen-coding.ru/eclipse/updates/":http://zen-coding.ru/eclipse/updates/- "http://media.chikuyonok.ru/eclipse/updates/":http://media.chikuyonok.ru/eclipse/updates/ in update sites (zen-coding.ru may be down due to some issues)
 # Check _Zen Coding for Eclipse_ group in available plugins list, click Next button and follow the installation instructions
 # Restart Eclipse
 
@@ -39,7 +39,7 @@ This plugin provides native Zen Coding support for Eclipse. Unlike the "previous
 * Works across all Eclipse editors (even in WebTool's XML Editor; the EclipseMonkey plugin throws exception on it)
 * Preferences support to fine-tune output for each syntax and add new abbreviations and snippets
 
-!http://zen-coding.ru/eclipse/prefs.png!
+!http://media.chikuyonok.ru/eclipse/prefs.png!
 
 h3. Notes
 
