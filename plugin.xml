@@ -367,6 +367,18 @@
                name="CSS"/>
          <contextType
                class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.templates.xml"
+               name="XML"/>
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.templates.xsl"
+               name="XSL"/>
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
+               id="ru.zencoding.eclipse.templates.haml"
+               name="HAML"/>
+         <contextType
+               class="ru.zencoding.eclipse.ZenCodingContextType"
                id="ru.zencoding.eclipse.variable"
                name="Variable"/>
                
