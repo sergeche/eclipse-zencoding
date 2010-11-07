@@ -1,12 +1,12 @@
 h1. Zen Coding
 
-Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other structured code format) coding and editing. The core of this plugin is a powerful abbreviation engine which allows you to expand expressionsÑsimilar to CSS selectorsÑinto HTML code. For example:
+Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other structured code format) coding and editing. The core of this plugin is a powerful abbreviation engine which allows you to expand expressionsâ€”similar to CSS selectorsâ€”into HTML code. For example:
 
 @div#page>div.logo+ul#navigation>li*5>a@
 
 ...can be expanded into:
 
-```
+```html
 <div id="page">
         <div class="logo"></div>
         <ul id="navigation">
@@ -21,6 +21,13 @@ Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other struc
 
 [[Read more about current Zen Coding syntax|http://code.google.com/p/zen-coding/wiki/ZenHTMLSelectorsEn]]
 
+h2. Installation
+
+1. Go to _Help > Install New Software..._ in your Eclipse IDE
+2. Add http://zen-coding.ru/eclipse/updates/ in update sites
+3. Check _Zen Coding for Eclipse_ group in available plugins list, click Next button and follow the installation instructions
+4. Restart Eclipse
+
 h2. Plugin Overview
 
 This plugin provides native Zen Coding support for Eclipse. Unlike the [[previous version|http://code.google.com/p/zen-coding/wiki/AptanaHowToEn]], this plugin doesn't require EclipseMonkey/Aptana to be installed in your Eclipse IDE and provides superior feature support:
@@ -30,14 +37,8 @@ This plugin provides native Zen Coding support for Eclipse. Unlike the [[previou
 * Change action shortcuts in Eclipse's Keys preferences page
 * Works across all Eclipse editors (even in WebTool's XML Editor; the EclipseMonkey plugin throws exception on it)
 * Preferences support to fine-tune output for each syntax and add new abbreviations and snippets
-[[http://zen-coding.ru/eclipse/prefs.png]]
 
-h2. Installation
-
-1. Go to _Help > Install New Software..._ in your Eclipse IDE
-2. Add http://zen-coding.ru/eclipse/updates/ in update sites
-3. Check _Zen Coding for Eclipse_ group in available plugins list, click Next button and follow the installation instructions
-4. Restart Eclipse
+!http://zen-coding.ru/eclipse/prefs.png!
 
 h3. Notes
 
