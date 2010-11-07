@@ -406,6 +406,31 @@
             id="ru.zencoding.eclipse.variable.charset">
 			<pattern>UTF-8</pattern>
 		</template>
+        <template
+            autoinsert="true"
+            name="brad"
+            description="Border-radius"
+            contextTypeId="ru.zencoding.eclipse.templates.css"
+            id="ru.zencoding.eclipse.template.brad">
+<pattern>
+-webkit-border-radius: ${radius};
+-moz-border-radius: ${radius};
+border-radius: ${radius};
+</pattern>
+		</template>
+        <template
+            autoinsert="true"
+            name="bsha"
+            description="Box shadow"
+            contextTypeId="ru.zencoding.eclipse.templates.css"
+            id="ru.zencoding.eclipse.template.bsha">
+<pattern>
+-webkit-box-shadow: ${hoff} ${voff} ${blur} ${color};
+-moz-box-shadow: ${hoff} ${voff} ${blur} ${color};
+-ms-box-shadow: ${hoff} ${voff} ${blur} ${color};
+box-shadow: ${hoff} ${voff} ${blur} ${color};
+</pattern>
+		</template>
     </extension>
 
 </plugin>
