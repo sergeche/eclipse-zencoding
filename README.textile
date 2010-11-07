@@ -6,7 +6,7 @@ Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other struc
 
 ...can be expanded into:
 
-```html
+<pre><code>
 <div id="page">
         <div class="logo"></div>
         <ul id="navigation">
@@ -17,20 +17,20 @@ Zen Coding is an editor plugin for high-speed HTML, XML, XSL (or any other struc
                 <li><a href=""></a></li>
         </ul>
 </div>
-```
+</code></pre>
 
-[[Read more about current Zen Coding syntax|http://code.google.com/p/zen-coding/wiki/ZenHTMLSelectorsEn]]
+"Read more about current Zen Coding syntax":http://code.google.com/p/zen-coding/wiki/ZenHTMLSelectorsEn
 
 h2. Installation
 
-1. Go to _Help > Install New Software..._ in your Eclipse IDE
-2. Add http://zen-coding.ru/eclipse/updates/ in update sites
-3. Check _Zen Coding for Eclipse_ group in available plugins list, click Next button and follow the installation instructions
-4. Restart Eclipse
+# Go to _Help > Install New Software..._ in your Eclipse IDE
+# Add http://zen-coding.ru/eclipse/updates/ in update sites
+# Check _Zen Coding for Eclipse_ group in available plugins list, click Next button and follow the installation instructions
+# Restart Eclipse
 
 h2. Plugin Overview
 
-This plugin provides native Zen Coding support for Eclipse. Unlike the [[previous version|http://code.google.com/p/zen-coding/wiki/AptanaHowToEn]], this plugin doesn't require EclipseMonkey/Aptana to be installed in your Eclipse IDE and provides superior feature support:
+This plugin provides native Zen Coding support for Eclipse. Unlike the "previous version":http://code.google.com/p/zen-coding/wiki/AptanaHowToEn, this plugin doesn't require EclipseMonkey/Aptana to be installed in your Eclipse IDE and provides superior feature support:
 
 * Expand abbreviations by Tab key
 * Simple install and update process
