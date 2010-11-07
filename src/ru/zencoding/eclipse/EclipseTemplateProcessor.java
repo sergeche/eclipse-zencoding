@@ -1,6 +1,8 @@
-package ru.zencoding;
+package ru.zencoding.eclipse;
 
 import java.util.ArrayList;
+
+import ru.zencoding.JSExecutor;
 
 /**
  * Processes Eclipse template and converts it to Zen Coding abbreviation/snippet
