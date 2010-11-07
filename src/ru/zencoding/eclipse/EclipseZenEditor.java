@@ -49,7 +49,6 @@ public class EclipseZenEditor implements IZenEditor {
 	public void setContext(IEditorPart editor) {
 		this.editor = editor;
 		doc = EclipseZenCodingHelper.getDocument(editor);
-		System.out.println("Document is " + doc);
 	}
 	
 	public boolean isValid() {
@@ -324,12 +323,16 @@ public class EclipseZenEditor implements IZenEditor {
 	public String padString(String text, String pad) {
 		StringBuilder result = new StringBuilder();
 		
-		String lines[] = text.split("\\r?\\n");
 		String newline = "\n";
 		String[] legalNl = doc.getLegalLineDelimiters();
 		if (legalNl != null && legalNl.length > 0)
 			newline = legalNl[0];
-			
+		
+		String lines[] =  text.replaceAll("\\r\\n", "\n")
+			.replaceAll("\\n\\r", "\n")
+			.replaceAll("\\n", newline)
+			.split(newline);
+		
 		if (lines.length > 0) {
 			result.append(lines[0]);
 			for (int i = 1; i < lines.length; i++) {
