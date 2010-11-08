@@ -1,6 +1,12 @@
 package ru.zencoding.eclipse;
 
+import java.lang.reflect.Method;
+
+import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.text.ITypedRegion;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.texteditor.ITextEditor;
 
 
 /**
@@ -27,21 +33,64 @@ public class EditorTypeInvestigator {
 	 * Returns current editor's syntax mode
 	 */
 	public static String getSyntax(EclipseZenEditor editor) {
-		// we need current editor, not the text one, because of multi-page editors
-		String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
+		String result = null;
 		
-		if (className.indexOf("xml") != -1)
+		IDocument doc = editor.getDocument();
+		
+		// try to get current partition (true Eclipse)
+		try {
+			ITypedRegion[] regions = doc.computePartitioning(editor.getCaretPos(), 0);
+			if (regions.length > 0) {
+				result = guessSyntaxFromString(regions[0].getType());
+			}
+		} catch (Exception e) {	}
+		
+		if (result == null) {
+			// try Aptana 2 way
+			IEditorPart ed = editor.getEditor();
+			if (ed instanceof ITextEditor) {
+				Class<? extends IEditorPart> editorClass = ed.getClass();
+				try {
+					Method getFileContext = editorClass.getMethod("getFileContext", new Class[]{});
+					Object fileContext = getFileContext.invoke(ed);
+					if (fileContext != null) {
+						Class<? extends Object> fcClass = fileContext.getClass();
+						Method getPartition = fcClass.getMethod("getPartitionAtOffset", new Class[]{Integer.TYPE});
+						ITypedRegion region = (ITypedRegion) getPartition.invoke(fileContext, new Object[]{editor.getCaretPos()});
+						result = guessSyntaxFromString(region.getType());
+					}
+					
+				} catch (Exception e) {  }
+			}
+		}
+		
+		if (result == null) {
+			// try to guess syntax from editor class
+			String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
+			result = guessSyntaxFromString(className);
+		}
+		
+		if (result == null)
+			result = TYPE_HTML; // fallback to HTML
+		
+		return result;
+	}
+
+	private static String guessSyntaxFromString(String str) {
+		if (str.indexOf("xml") != -1)
 			return TYPE_XML;
-		else if (className.indexOf("xsleditor") != -1)
+		else if (str.indexOf("xsleditor") != -1)
 			return TYPE_XSL;
-		else if (className.indexOf("hamleditor") != -1)
+		else if (str.indexOf("hamleditor") != -1)
 			return TYPE_HAML;
-		else if (className.indexOf("sasseditor") != -1)
+		else if (str.indexOf("sasseditor") != -1)
 			return TYPE_CSS;
-		else if (className.indexOf("css") != -1)
+		else if (str.indexOf("css") != -1)
 			return TYPE_CSS;
-		else 
+		else if (str.indexOf("html") != -1)
 			return TYPE_HTML;
+		
+		return null;
 	}
 	
 	/**

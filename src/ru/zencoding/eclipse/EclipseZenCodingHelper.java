@@ -96,7 +96,7 @@ public class EclipseZenCodingHelper {
 		if (viewer == null) {
 			Class editorClass = editor.getClass();
 			try {
-				Method getViewer = editorClass.getMethod("getViewer", null);
+				Method getViewer = editorClass.getMethod("getViewer", new Class[]{});
 				viewer = (ITextViewer) getViewer.invoke(editor);
 			} catch (Exception e) {	}
 		}
