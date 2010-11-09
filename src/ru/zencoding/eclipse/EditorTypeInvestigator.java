@@ -36,6 +36,7 @@ public class EditorTypeInvestigator {
 		String result = null;
 		
 		IDocument doc = editor.getDocument();
+		String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
 		
 		// try to get current partition (true Eclipse)
 		try {
@@ -66,24 +67,27 @@ public class EditorTypeInvestigator {
 		
 		if (result == null) {
 			// try to guess syntax from editor class
-			String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
 			result = guessSyntaxFromString(className);
 		}
 		
 		if (result == null)
 			result = TYPE_HTML; // fallback to HTML
 		
+		// in case of WTP's XML editor, we have to check editor class too
+		if (result == TYPE_XML && guessSyntaxFromString(className) == TYPE_XSL)
+			result = TYPE_XSL;
+		
 		return result;
 	}
 
 	private static String guessSyntaxFromString(String str) {
-		if (str.indexOf("xml") != -1)
-			return TYPE_XML;
-		else if (str.indexOf("xsleditor") != -1)
+		if (str.indexOf("xsl") != -1)
 			return TYPE_XSL;
-		else if (str.indexOf("hamleditor") != -1)
+		else if (str.indexOf("xml") != -1)
+			return TYPE_XML;
+		else if (str.indexOf("haml") != -1)
 			return TYPE_HAML;
-		else if (str.indexOf("sasseditor") != -1)
+		else if (str.indexOf("sass") != -1)
 			return TYPE_CSS;
 		else if (str.indexOf("css") != -1)
 			return TYPE_CSS;
