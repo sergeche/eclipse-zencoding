@@ -12,6 +12,7 @@ import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.TextSelection;
+import org.eclipse.jface.text.TextUtilities;
 import org.eclipse.jface.text.link.LinkedModeModel;
 import org.eclipse.jface.text.link.LinkedModeUI;
 import org.eclipse.jface.text.link.LinkedPosition;
@@ -314,6 +315,10 @@ public class EclipseZenEditor implements IZenEditor {
 		return result.toString();
 	}
 	
+	public String getNewline() {
+		return TextUtilities.getDefaultLineDelimiter(doc);
+	}
+	
 	/**
 	 * Indents text with padding
 	 * @param {String} text Text to indent
@@ -322,22 +327,16 @@ public class EclipseZenEditor implements IZenEditor {
 	 */
 	public String padString(String text, String pad) {
 		StringBuilder result = new StringBuilder();
-		
-		String newline = "\n";
-		String[] legalNl = doc.getLegalLineDelimiters();
-		if (legalNl != null && legalNl.length > 0)
-			newline = legalNl[0];
-		
-		String lines[] =  text.replaceAll("\\r\\n", "\n")
-			.replaceAll("\\n\\r", "\n")
-			.replaceAll("\\n", newline)
-			.split(newline);
+		String newline = getNewline();
+		String lines[] =  text.split("\\r\\n|\\n\\r|\\r|\\n");
 		
 		if (lines.length > 0) {
 			result.append(lines[0]);
 			for (int i = 1; i < lines.length; i++) {
 				result.append(newline + pad + lines[i]);
 			}
+		} else {
+			result.append(text);
 		}
 			
 		return result.toString();
