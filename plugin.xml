@@ -73,6 +73,56 @@
             categoryId="ru.zencoding.eclipse.commands.category"
             id="ru.zencoding.eclipse.commands.update_image_size">
       </command>
+      <command
+            name="Increment number by 1"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.increment_number_by_1">
+      </command>
+      <command
+            name="Decrement number by 1"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.decrement_number_by_1">
+      </command>
+      <command
+            name="Increment number by 0.1"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.increment_number_by_01">
+      </command>
+      <command
+            name="Decrement number by 0.1"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.decrement_number_by_01">
+      </command>
+      <command
+            name="Increment number by 10"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.increment_number_by_10">
+      </command>
+      <command
+            name="Decrement number by 10"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.decrement_number_by_10">
+      </command>
+      <command
+            name="Evaluate Math Expression"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.evaluate_math_expression">
+      </command>
+      <command
+            name="Select Next Item"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.select_next_item">
+      </command>
+      <command
+            name="Select Previous Item"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.select_previous_item">
+      </command>
+      <command
+            name="Reflect CSS Value"
+            categoryId="ru.zencoding.eclipse.commands.category"
+            id="ru.zencoding.eclipse.commands.reflect_css_value">
+      </command>
    </extension>
    <extension
          point="org.eclipse.ui.handlers">
@@ -126,6 +176,46 @@
       </handler>
       <handler
             commandId="ru.zencoding.eclipse.commands.update_image_size"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.increment_number_by_1"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.increment_number_by_01"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.increment_number_by_10"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.decrement_number_by_1"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.decrement_number_by_01"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.decrement_number_by_10"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.evaluate_math_expression"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.select_next_item"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.select_previous_item"
+            class="ru.zencoding.eclipse.handlers.DefaultAction">
+      </handler>
+      <handler
+            commandId="ru.zencoding.eclipse.commands.reflect_css_value"
             class="ru.zencoding.eclipse.handlers.DefaultAction">
       </handler>
    </extension>
@@ -212,25 +302,93 @@
                label="Zen Coding"
                mnemonic="Z"
                id="ru.zencoding.eclipse.menus.zencodingMenu">
+               
+            <menu
+                  id="ru.zencoding.eclipse.menus.zencodingMenu.numbers"
+                  label="Numbers"
+                  mnemonic="B">
+               <command
+                     commandId="ru.zencoding.eclipse.commands.increment_number_by_1"
+                     id="ru.zencoding.eclipse.menus.increment_number_by_1">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.decrement_number_by_1"
+                     id="ru.zencoding.eclipse.menus.decrement_number_by_1">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.increment_number_by_01"
+                     id="ru.zencoding.eclipse.menus.increment_number_by_01">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.decrement_number_by_01"
+                     id="ru.zencoding.eclipse.menus.decrement_number_by_01">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.increment_number_by_10"
+                     id="ru.zencoding.eclipse.menus.increment_number_by_10">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.decrement_number_by_10"
+                     id="ru.zencoding.eclipse.menus.decrement_number_by_10">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.evaluate_math_expression"
+                     id="ru.zencoding.eclipse.menus.evaluate_math_expression">
+               </command>
+            </menu>
+            <menu
+                  id="ru.zencoding.eclipse.menus.zencodingMenu.html"
+                  label="HTML"
+                  mnemonic="h">
+               <command
+                     commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
+                     id="ru.zencoding.eclipse.menus.wrap_with_abbreviation"
+                     mnemonic="W">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.match_pair_outward"
+                     id="ru.zencoding.eclipse.menus.match_pair_outward"
+                     mnemonic="M">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.match_pair_inward"
+                     id="ru.zencoding.eclipse.menus.match_pair_inward"
+                     mnemonic="I">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.matching_pair"
+                     id="ru.zencoding.eclipse.menus.matching_pair"
+                     mnemonic="G">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.split_join_tag"
+                     id="ru.zencoding.eclipse.menus.split_join_tag"
+                     mnemonic="J">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.remove_tag"
+                     id="ru.zencoding.eclipse.menus.remove_tag"
+                     mnemonic="V">
+               </command>
+               <command
+                     commandId="ru.zencoding.eclipse.commands.update_image_size"
+                     id="ru.zencoding.eclipse.menus.update_image_size"
+                     mnemonic="Z">
+               </command>
+            </menu>
+            <menu
+                  id="ru.zencoding.eclipse.menus.zencodingMenu.css"
+                  label="CSS"
+                  mnemonic="C">
+               <command
+                     commandId="ru.zencoding.eclipse.commands.reflect_css_value"
+                     id="ru.zencoding.eclipse.menus.reflect_css_value">
+               </command>
+            </menu>
             <command
                   commandId="ru.zencoding.eclipse.commands.expandAbbreviationCommand"
                   mnemonic="E"
                   id="ru.zencoding.eclipse.menus.expandAbbreviationCommand">
-            </command>
-            <command
-                  commandId="ru.zencoding.eclipse.commands.match_pair_outward"
-                  mnemonic="M"
-                  id="ru.zencoding.eclipse.menus.match_pair_outward">
-            </command>
-            <command
-                  commandId="ru.zencoding.eclipse.commands.match_pair_inward"
-                  mnemonic="I"
-                  id="ru.zencoding.eclipse.menus.match_pair_outward">
-            </command>
-            <command
-                  commandId="ru.zencoding.eclipse.commands.wrap_with_abbreviation"
-                  mnemonic="W"
-                  id="ru.zencoding.eclipse.menus.wrap_with_abbreviation">
             </command>
             <command
                   commandId="ru.zencoding.eclipse.commands.prev_edit_point"
@@ -243,11 +401,6 @@
                   id="ru.zencoding.eclipse.menus.next_edit_point">
             </command>
             <command
-                  commandId="ru.zencoding.eclipse.commands.matching_pair"
-                  mnemonic="G"
-                  id="ru.zencoding.eclipse.menus.matching_pair">
-            </command>
-            <command
                   commandId="ru.zencoding.eclipse.commands.merge_lines"
                   mnemonic="R"
                   id="ru.zencoding.eclipse.menus.merge_lines">
@@ -258,24 +411,17 @@
                   id="ru.zencoding.eclipse.menus.toggle_comment">
             </command>
             <command
-                  commandId="ru.zencoding.eclipse.commands.split_join_tag"
-                  mnemonic="J"
-                  id="ru.zencoding.eclipse.menus.split_join_tag">
-            </command>
-            <command
-                  commandId="ru.zencoding.eclipse.commands.remove_tag"
-                  mnemonic="V"
-                  id="ru.zencoding.eclipse.menus.remove_tag">
-            </command>
-            <command
                   commandId="ru.zencoding.eclipse.commands.encode_decode_data_url"
                   mnemonic="U"
                   id="ru.zencoding.eclipse.menus.encode_decode_data_url">
             </command>
             <command
-                  commandId="ru.zencoding.eclipse.commands.update_image_size"
-                  mnemonic="Z"
-                  id="ru.zencoding.eclipse.menus.update_image_size">
+                  commandId="ru.zencoding.eclipse.commands.select_next_item"
+                  id="ru.zencoding.eclipse.menus.select_next_item">
+            </command>
+            <command
+                  commandId="ru.zencoding.eclipse.commands.select_previous_item"
+                  id="ru.zencoding.eclipse.menus.select_previous_item">
             </command>
          </menu>
       </menuContribution>

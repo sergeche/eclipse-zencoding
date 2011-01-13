@@ -84,6 +84,19 @@ public interface IZenEditor {
 	public void replaceContent(String value, int start, int end);
 	
 	/**
+	 * Replace editor's content part (from <code>start</code> to 
+	 * <code>end</code> index) with <code>value</code>. If <code>value</code> 
+	 * contains <code>caret_placeholder</code>, the editor will put caret into 
+	 * this position.  
+	 *  
+	 * @param value Content you want to paste
+	 * @param start Start index of editor's content
+	 * @param end End index of editor's content
+	 * @param no_indent Do not indent pasted value
+	 */
+	public void replaceContent(String value, int start, int end, boolean no_indent);
+	
+	/**
 	 * Returns editor's content
 	 */
 	public String getContent();

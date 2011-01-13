@@ -110,17 +110,25 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public void replaceContent(String value) {
-		replaceContent(value, 0, doc.getLength());
+		replaceContent(value, 0, doc.getLength(), false);
 	}
 
 	@Override
 	public void replaceContent(String value, int start) {
-		replaceContent(value, start, start);
+		replaceContent(value, start, start, false);
+	}
+	
+	@Override
+	public void replaceContent(String value, int start, int end) {
+		replaceContent(value, start, end, false);
 	}
 
 	@Override
-	public void replaceContent(String value, int start, int end) {
-		String newValue = padString(value, getStringPadding(getCurrentLine()));
+	public void replaceContent(String value, int start, int end, boolean no_indent) {
+		String newValue = value;
+		if (!no_indent)
+			newValue = padString(value, getStringPadding(getCurrentLine()));
+		
 		TabStopStructure tabStops = handleTabStops(newValue);
 		newValue = tabStops.getText();
 		
