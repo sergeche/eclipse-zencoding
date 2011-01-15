@@ -3374,7 +3374,7 @@ function mergeLines(editor) {
  * @param {zen_editor} editor
  */
 function toggleComment(editor) {
-	switch (editor.getSyntax()) {
+	switch (String(editor.getSyntax())) {
 		case 'css':
 			return toggleCSSComment(editor);
 		default:
@@ -3488,7 +3488,7 @@ function escapeForRegexp(str) {
  * @return {Boolean}
  */
 function genericCommentToggle(editor, comment_start, comment_end, range_start, range_end) {
-	var content = editor.getContent(),
+	var content = String(editor.getContent()),
 		caret_pos = editor.getCaretPos(),
 		new_content = null;
 		
