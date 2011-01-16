@@ -25,11 +25,16 @@ public class InsertFormattedLineBreakAction {
 					int c_len = content.length();
 					String nl = editor.getNewline();
 					
+					String nextNl = editor.getDocument().getLineDelimiter( editor.getDocument().getLineOfOffset(caretPos) );
+					
+					if (nextNl != null)
+						nl = nextNl;
+					
 					// check out next line padding
 					SelectionData lineRange = editor.getCurrentLineRange();
 					StringBuilder nextPadding = new StringBuilder();
 					
-					for (int i = lineRange.getEnd() + 1; i < c_len; i++) {
+					for (int i = lineRange.getEnd() + nl.length(); i < c_len; i++) {
 						char ch = content.charAt(i);
 						if (ch == ' ' || ch == '\t')
 							nextPadding.append(ch);
