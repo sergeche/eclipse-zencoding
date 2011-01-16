@@ -263,7 +263,7 @@ public class EclipseZenEditor implements IZenEditor {
 			carets.add(0);
 			text = "";
 		} else {
-			String[] chunks = text.split(Pattern.quote(getCaretPlaceholder()));
+			String[] chunks = text.split(Pattern.quote(getCaretPlaceholder()), -1);
 			int offset = 0;
 			StringBuilder buf = new StringBuilder();
 			
@@ -336,7 +336,7 @@ public class EclipseZenEditor implements IZenEditor {
 	public String padString(String text, String pad) {
 		StringBuilder result = new StringBuilder();
 		String newline = getNewline();
-		String lines[] =  text.split("\\r\\n|\\n\\r|\\r|\\n");
+		String lines[] =  text.split("\\r\\n|\\n\\r|\\r|\\n", -1);
 		
 		if (lines.length > 0) {
 			result.append(lines[0]);
