@@ -42,6 +42,19 @@ public class EclipseZenCodingPreferencePage
 				PreferenceConstants.P_TAB_EXPAND,
 				"&Expand abbreviations by Tab key",
 				getFieldEditorParent()));
+		
+		addField(
+			new BooleanFieldEditor(
+					PreferenceConstants.P_UPGRADE_EDITORS,
+					"&Upgrade web editors",
+					getFieldEditorParent()));
+		
+		addField(new LabelFieldEditor(
+			"This option provides better newline insertion behaviour for \n" +
+			"Web editors (Eclipse WTP's HTML, XML, XSL and CSS; Aptana's CSS editor).\n" +
+			"For CSS editor, you can specify 'close_css_brace' variable \n" +
+			"(see Variable section) with the value that will be automatically \n" +
+			"inserted instead of closing brace of CSS rule defition.", getFieldEditorParent()));
 	}
 
 	/* (non-Javadoc)

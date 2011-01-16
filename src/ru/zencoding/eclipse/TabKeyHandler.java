@@ -19,6 +19,7 @@ import org.eclipse.ui.texteditor.AbstractTextEditor;
 import org.eclipse.ui.texteditor.ITextEditor;
 
 import ru.zencoding.eclipse.handlers.ExpandAbbreviationAction;
+import ru.zencoding.eclipse.handlers.InsertFormattedLineBreakAction;
 import ru.zencoding.eclipse.preferences.PreferenceConstants;
 
 /**
@@ -120,9 +121,14 @@ public class TabKeyHandler {
 						return;
 					}
 					
-					if (event.doit && event.keyCode == 9 && ExpandAbbreviationAction.expand()) {
-						event.doit = false; // cancel the event
+					if (event.doit) {
+						if (event.keyCode == 9) { // Tab key
+							event.doit = !ExpandAbbreviationAction.expand();
+						} else if (event.keyCode == 13) { // Enter key
+							event.doit = !InsertFormattedLineBreakAction.execute();
+						}
 					}
+					
 				}
 			});
 		}

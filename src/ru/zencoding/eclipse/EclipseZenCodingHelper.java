@@ -317,5 +317,23 @@ public class EclipseZenCodingHelper {
 		}
 		return retu.toString();
 	}
+	
+	/**
+	 * Returns string representation of passed editor
+	 * @param editor
+	 * @return
+	 */
+	public static String getEditorString(EclipseZenEditor editor) {
+		return editor.getEditor().toString().toLowerCase();
+	}
+	
+	/**
+	 * Test if current editor belongs to Aptana
+	 * @param editor
+	 * @return
+	 */
+	public static boolean isApatana(EclipseZenEditor editor) {
+		return getEditorString(editor).indexOf(".aptana.") != -1;
+	}
 
 }

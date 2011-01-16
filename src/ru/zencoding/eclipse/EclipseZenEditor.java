@@ -127,7 +127,7 @@ public class EclipseZenEditor implements IZenEditor {
 	public void replaceContent(String value, int start, int end, boolean no_indent) {
 		String newValue = value;
 		if (!no_indent)
-			newValue = padString(value, getStringPadding(getCurrentLine()));
+			newValue = padString(value, getCurrentLinePadding());
 		
 		TabStopStructure tabStops = handleTabStops(newValue);
 		newValue = tabStops.getText();
@@ -185,6 +185,10 @@ public class EclipseZenEditor implements IZenEditor {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+	}
+
+	public String getCurrentLinePadding() {
+		return getStringPadding(getCurrentLine());
 	}
 	
 	private void findTabStopLabels(String text, Properties tabStopLabels) {
