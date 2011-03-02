@@ -247,7 +247,7 @@ var zen_settings = {
 			"bg": "background:|;",
 			"bg+": "background:#FFF url(|) 0 0 no-repeat;",
 			"bg:n": "background:none;",
-			"bg:ie": "filter:progid:DXImageTransform.Microsoft.AlphaImageLoader(src='|x.png');",
+			"bg:ie": "filter:progid:DXImageTransform.Microsoft.AlphaImageLoader(src='${1:x}.png',sizingMethod='${2:crop}');",
 			"bgc": "background-color:#FFF;",
 			"bgi": "background-image:url(|);",
 			"bgi:n": "background-image:none;",
@@ -1108,6 +1108,7 @@ try {
 		this.text = null;
 		this.attributes = [];
 		this.is_repeating = false;
+		this.has_implict_name = false;
 	}
 	
 	TreeNode.prototype = {
@@ -1162,6 +1163,7 @@ try {
 				if (name) {
 					var attr_result = parseAttributes(name);
 					this.name = attr_result[0] || 'div';
+					this.has_implict_name = !attr_result[0];
 					this.attributes = attr_result[1];
 				}
 			}
@@ -1889,7 +1891,9 @@ try {
 		this._content = '';
 		this._paste_content = '';
 		this.repeat_by_lines = node.is_repeating;
+		this.is_repeating = node && node.count > 1;
 		this.parent = null;
+		this.has_implicit_name = node.has_implict_name;
 		
 		this.setContent(node.text);
 		
@@ -2028,11 +2032,14 @@ try {
 		this.children = [];
 		this._content = node.text || '';
 		this.repeat_by_lines = node.is_repeating;
-		this.attributes = {'id': getCaretPlaceholder(), 'class': getCaretPlaceholder()};
+		this.is_repeating = node && node.count > 1;
+		this.attributes = [];
 		this.value = replaceUnescapedSymbol(getSnippet(type, this.name), '|', getCaretPlaceholder());
 		this.parent = null;
 		this.syntax = type;
 		
+		this.addAttribute('id', getCaretPlaceholder());
+		this.addAttribute('class', getCaretPlaceholder());
 		this.copyAttributes(node);
 	}
 	
@@ -2085,6 +2092,9 @@ try {
 		this.real_name = tag.real_name;
 		this.children = [];
 		this.counter = 1;
+		this.is_repeating = tag.is_repeating;
+		this.repeat_by_lines = tag.repeat_by_lines;
+		this.has_implicit_name = this.type == 'tag' && tag.has_implicit_name;
 		
 		// create deep copy of attribute list so we can change
 		// their values in runtime without affecting other nodes
@@ -2124,6 +2134,11 @@ try {
 		 */
 		addChild: function(tag) {
 			tag.parent = this;
+			
+			// check for implicit name
+			if (tag.has_implicit_name && this.isInline())
+				tag.name = 'span';
+			
 			var last_child = this.children[this.children.length - 1];
 			if (last_child) {
 				tag.previousSibling = last_child;
@@ -2255,6 +2270,7 @@ try {
 		 */
 		pasteContent: function(text, had_var) {
 			had_var = had_var || 0;
+			var symbol = '$#';
 			var fn = function(str, p1) {
 				if (p1 == 'output') {
 					had_var = 1;
@@ -2264,12 +2280,20 @@ try {
 				return str;
 			};
 			
+			var fn2 = function() {
+				had_var = 1;
+				return [symbol, text];
+			}
+			
 			for (var i = 0, il = this.attributes.length; i < il; i++) {
 				var a = this.attributes[i];
 				a.value = replaceVariables(a.value, fn);
+				a.value = replaceUnescapedSymbol(a.value, symbol, fn2);
 			}
 			
 			this.content = replaceVariables(this.content, fn);
+			this.content = replaceUnescapedSymbol(this.content, symbol, fn2);
+			
 			if (this.hasChildren()) {
 				for (var i = 0, il = this.children.length; i < il; i++) {
 					had_var = this.children[i].pasteContent(text, had_var);
@@ -2858,17 +2882,20 @@ try {
 		 */
 		upgradeTabstops: function(node, offset) {
 			var max_num = 0,
-				props = ['start', 'end', 'content'];
-				
-			for (var i = 0, il = props.length; i < il; i++) {
-				node[props[i]] = node[props[i]].replace(/\$(\d+)|\$\{(\d+)(\:[^\}]+)?\}/g, function(str, p1, p2){
-					var num = parseInt(p1 || p2, 10);
-					if (num > max_num)
-						max_num = num;
+				props = ['start', 'end', 'content'],
+				escape_fn = function(ch){ return '\\' + ch; },
+				tabstop_fn = function(i, num, value) {
+					num = parseInt(num);
+					if (num > max_num) max_num = num;
 						
-					return str.replace(/\d+/, num + offset);
-				});
-			}
+					if (value)
+						return '${' + (num + offset) + ':' + value + '}';
+					else
+						return '$' + (num + offset);
+				};
+				
+			for (var i = 0, il = props.length; i < il; i++)
+				node[props[i]] = this.processTextBeforePaste(node[props[i]], escape_fn, tabstop_fn);
 			
 			return max_num;
 		},
@@ -2935,6 +2962,99 @@ try {
 					}
 				}
 			}
+		},
+		
+		/**
+		 * Returns context-aware node counter
+		 * @param {node} ZenNode
+		 * @return {Number}
+		 */
+		getCounterForNode: function(node) {
+			// find nearest repeating parent
+			var counter = node.counter;
+			if (!node.is_repeating && !node.repeat_by_lines) {
+				while (node = node.parent) {
+					if (node.is_repeating || node.repeat_by_lines)
+						return node.counter;
+				}
+			}
+			
+			return counter;
+		},
+		
+		/**
+		 * Process text that should be pasted into editor: clear escaped text and
+		 * handle tabstops
+		 * @param {String} text
+		 * @param {Function} escape_fn Handle escaped character. Must return
+		 * replaced value
+		 * @param {Function} tabstop_fn Callback function that will be called on every
+		 * tabstob occurance, passing <b>index</b>, <code>number</code> and 
+		 * <b>value</b> (if exists) arguments. This function must return 
+		 * replacement value
+		 * @return {String} 
+		 */
+		processTextBeforePaste: function(text, escape_fn, tabstop_fn) {
+			var i = 0, il = text.length, start_ix, _i,
+				str_builder = [];
+				
+			var nextWhile = function(ix, fn) {
+				while (ix < il) if (!fn(text.charAt(ix++))) break;
+				return ix - 1;
+			};
+			
+			while (i < il) {
+				var ch = text.charAt(i);
+				if (ch == '\\' && i + 1 < il) {
+					// handle escaped character
+					str_builder.push(escape_fn(text.charAt(i + 1)));
+					i += 2;
+					continue;
+				} else if (ch == '$') {
+					// looks like a tabstop
+					var next_ch = text.charAt(i + 1) || '';
+					_i = i;
+					if (this.isNumeric(next_ch)) {
+						// $N placeholder
+						start_ix = i + 1;
+						i = nextWhile(start_ix, this.isNumeric);
+						if (start_ix < i) {
+							str_builder.push(tabstop_fn(_i, text.substring(start_ix, i)));
+							continue;
+						}
+					} else if (next_ch == '{') {
+						// ${N:value} or ${N} placeholder
+						var brace_count = 1;
+						start_ix = i + 2;
+						i = nextWhile(start_ix, this.isNumeric);
+						
+						if (i > start_ix) {
+							if (text.charAt(i) == '}') {
+								str_builder.push(tabstop_fn(_i, text.substring(start_ix, i)));
+								i++; // handle closing brace
+								continue;
+							} else if (text.charAt(i) == ':') {
+								var val_start = i + 2;
+								i = nextWhile(val_start, function(c) {
+									if (c == '{') brace_count++;
+									else if (c == '}') brace_count--;
+									return !!brace_count;
+								});
+								str_builder.push(tabstop_fn(_i, text.substring(start_ix, val_start - 2), text.substring(val_start - 1, i)));
+								i++; // handle closing brace
+								continue;
+							}
+						}
+					}
+					i = _i;
+				}
+				
+				// push current character to stack
+				str_builder.push(ch);
+				i++;
+			}
+			
+			return str_builder.join('');
 		}
 	}
 })();/**
@@ -3132,7 +3252,7 @@ function wrapWithAbbreviation(editor, abbr, syntax, profile_name) {
 		end_offset = narrowed_sel[1];
 	}
 	
-	var new_content = content.substring(start_offset, end_offset),
+	var new_content = zen_coding.escapeText(content.substring(start_offset, end_offset)),
 		result = zen_coding.wrapWithAbbreviation(abbr, unindent(editor, new_content), syntax, profile_name);
 	
 	if (result) {
@@ -3335,8 +3455,7 @@ function insertFormattedNewlineOnly(editor) {
  */
 function insertFormattedNewline(editor) {
 	if (!insertFormattedNewlineOnly(editor)) {
-		var pad = zen_coding.getVariable('indentation'),
-			cur_padding = getCurrentLinePadding(editor),
+		var cur_padding = getCurrentLinePadding(editor),
 			content = String(editor.getContent()),
 			caret_pos = editor.getCaretPos(),
 			c_len = content.length,
@@ -3348,7 +3467,7 @@ function insertFormattedNewline(editor) {
 			
 		for (var i = line_range.end + 1, ch; i < c_len; i++) {
 			ch = content.charAt(i);
-			if (ch == '\s' || ch == '\t')
+			if (ch == ' ' || ch == '\t')
 				next_padding += ch;
 			else
 				break;
@@ -3357,7 +3476,7 @@ function insertFormattedNewline(editor) {
 		if (next_padding.length > cur_padding.length)
 			editor.replaceContent(nl + next_padding, caret_pos, caret_pos, true);
 		else
-			editor.replaceContent(zen_coding.getNewline(), caret_pos);
+			editor.replaceContent(nl, caret_pos);
 	}
 }
 
@@ -3832,107 +3951,6 @@ function decodeFromBase64(editor, data, pos) {
 }
 
 /**
- * Find image tag under caret
- * @param {zen_editor} editor
- * @return Image tag and its indexes inside editor source
- */
-function findImage(editor) {
-	var caret_pos = editor.getCaretPos(),
-		content = String(editor.getContent()),
-		content_len = content.length,
-		start_ix = -1,
-		end_ix = -1;
-	
-	// find the beginning of the tag
-	do {
-		if (caret_pos < 0)
-			break;
-		if (content.charAt(caret_pos) == '<') {
-			if (content.substring(caret_pos, caret_pos + 4).toLowerCase() == '<img') {
-				// found the beginning of the image tag
-				start_ix = caret_pos;
-				break;
-			} else {
-				// found some other tag
-				return null;
-			}
-		}
-	} while(caret_pos--);
-	
-	// find the end of the tag 
-	caret_pos = editor.getCaretPos();
-	do {
-		if (caret_pos >= content_len)
-			break;
-			
-		if (content.charAt(caret_pos) == '>') {
-			end_ix = caret_pos + 1;
-			break;
-		}
-	} while(caret_pos++);
-	
-	if (start_ix != -1 && end_ix != -1)
-		
-		return {
-			start: start_ix,
-			end: end_ix,
-			tag: content.substring(start_ix, end_ix)
-		};
-	
-	return null;
-}
-
-/**
- * Replaces or adds attribute to the tag
- * @param {String} img_tag
- * @param {String} attr_name
- * @param {String} attr_value
- */
-function replaceOrAppend(img_tag, attr_name, attr_value) {
-	if (img_tag.toLowerCase().indexOf(attr_name) != -1) {
-		// attribute exists
-		var re = new RegExp(attr_name + '=([\'"])(.*?)([\'"])', 'i');
-		return img_tag.replace(re, function(str, p1, p2){
-			return attr_name + '=' + p1 + attr_value + p1;
-		});
-	} else {
-		return img_tag.replace(/\s*(\/?>)$/, ' ' + attr_name + '="' + attr_value + '" $1');
-	}
-}
-
-/**
- * Update Image Size actions: reads image from &lt;img src=""&gt; file
- * and updates dimentions inside tag
- * @param {zen_editor} editor
- */
-function updateImageSize(editor) {
-	var offset = editor.getCaretPos();
-		
-	var image = findImage(editor);
-	if (image) {
-		var re = /\bsrc=(["'])(.+?)\1/i, m, src;
-		if (m = re.exec(image.tag))
-			src = m[2];
-		
-		if (src) {
-			var abs_path = zen_file.locateFile(editor.getFilePath(), src);
-			if (abs_path === null) {
-				throw "Can't find " + src + ' file';
-			}
-			
-			var size = zen_coding.getImageSize(String(zen_file.read(abs_path)));
-			if (size) {
-				var new_tag = replaceOrAppend(image.tag, 'width', size.width);
-				new_tag = replaceOrAppend(new_tag, 'height', size.height);
-				
-				editor.replaceContent(new_tag, image.start, image.end);
-				editor.setCaretPos(offset);
-			}
-		}
-	}
-}
-
-/**
  * Make decimal number look good: convert it to fixed precision end remove
  * traling zeroes 
  * @param {Number} num
@@ -4056,7 +4074,7 @@ zen_coding.registerAction('toggle_comment', toggleComment);
 zen_coding.registerAction('split_join_tag', splitJoinTag);
 zen_coding.registerAction('remove_tag', removeTag);
 zen_coding.registerAction('encode_decode_data_url', encodeDecodeBase64);
-zen_coding.registerAction('update_image_size', updateImageSize);
+//zen_coding.registerAction('update_image_size', updateImageSize);
 
 zen_coding.registerAction('increment_number_by_1', function(editor) {
 	return incrementNumber(editor, 1);
@@ -4321,7 +4339,7 @@ zen_coding.registerAction('evaluate_math_expression', evaluateMathExpression);
 							break;
 						}
 					} else if (hasMatch('<!--')) { // found comment
-						ix += check_str.search('-->') + 3;
+						ix += check_str.search('-->') + 2;
 					}
 				} else if (ch == '-' && hasMatch('-->')) {
 					// looks like cursor was inside comment with invalid HTML
@@ -5098,7 +5116,7 @@ var CSSEX = (function () {
         nextChar: function () {
             var me = this;
             me.chnum += 1;
-            while (typeof me.line[me.chnum] === 'undefined') {
+            while (me.line.charAt(me.chnum) === '') {
                 if (this.nextLine() === false) {
                     me.ch = false;
                     return false; // end of source
@@ -5107,8 +5125,11 @@ var CSSEX = (function () {
                 me.ch = '\n';
                 return '\n';
             }
-            me.ch = me.line[me.chnum];
+            me.ch = me.line.charAt(me.chnum);
             return me.ch;
+        },
+        peek: function() {
+            return this.line.charAt(this.chnum + 1);
         }
     };
 
@@ -5260,6 +5281,33 @@ var CSSEX = (function () {
         w.nextChar();
         tokener(token, 'string', conf);
     }
+    
+    function brace() {
+        var w = walker,
+            c = w.ch,
+            depth = 0,
+            token = c,
+            conf = getConf();
+    
+        c = w.nextChar();
+    
+        while (c !== ')' && !depth) {
+        	if (c === '(') {
+        		depth++;
+        	} else if (c === ')') {
+        		depth--;
+        	} else if (c === false) {
+        		throw error("Unterminated brace", conf);
+        	}
+        	
+        	token += c;
+            c = w.nextChar();
+        }
+        
+        token += c;
+        w.nextChar();
+        tokener(token, 'brace', conf);
+    }
 
     function identifier(pre) {
         var w = walker,
@@ -5269,6 +5317,10 @@ var CSSEX = (function () {
             
         c = w.nextChar();
     
+        if (pre) { // adjust token position
+        	conf['char'] -= pre.length;
+        }
+        
         while (isNameChar(c) || isDigit(c)) {
             token += c;
             c = w.nextChar();
@@ -5349,6 +5401,10 @@ var CSSEX = (function () {
         if (ch === '"' || ch === "'") {
             return str();
         }
+        
+        if (ch === '(') {
+            return brace();
+        }
     
         if (ch === '-' || ch === '.' || isDigit(ch)) { // tricky - char: minus (-1px) or dash (-moz-stuff)
             return num();
@@ -5367,7 +5423,7 @@ var CSSEX = (function () {
             walker.nextChar();
             return;
         }
-    
+        
         throw error("Unrecognized character");
     }
 
@@ -5408,6 +5464,7 @@ var CSSEX = (function () {
  * 
  * @include "sex.js"
  */var ParserUtils = (function() {
+	var css_stop_chars = '{}/\\<>';
 	
 	function isStopChar(token) {
 		var stop_chars = '{};:';
@@ -5517,7 +5574,7 @@ var CSSEX = (function () {
 		 * into a single chunk
 		 * @param {Array} tokens Tokens produced by <code>CSSEX.lex()</code>
 		 * @param {Number} offset CSS rule offset in source code (character index)
-		 * @param {String} Original CSS source code
+		 * @param {String} content Original CSS source code
 		 * @return {Array} Optimized tokens  
 		 */
 		optimizeCSS: function(tokens, offset, content) {
@@ -5525,6 +5582,7 @@ var CSSEX = (function () {
 			var result = [], token, i, il, _o = 0,
 				in_rules = false,
 				in_value = false,
+				delta = 0,
 				acc_type,
 				acc_tokens = {
 					/** @type {makeToken} */
@@ -5532,12 +5590,13 @@ var CSSEX = (function () {
 					/** @type {makeToken} */
 					value: null
 				},
+				nl_size,
 				orig_tokens = [];
 				
 			function addToken(token, type) {
 				if (type && type in acc_tokens) {
 					if (!acc_tokens[type]) {
-						acc_tokens[type] = makeToken(type, token.value, offset + token.charstart, i);
+						acc_tokens[type] = makeToken(type, token.value, offset + delta + token.charstart, i);
 						result.push(acc_tokens[type]);
 					} else {
 						acc_tokens[type].content += token.value;
@@ -5545,22 +5604,29 @@ var CSSEX = (function () {
 						acc_tokens[type].ref_end_ix = i;
 					}
 				} else {
-					result.push(makeToken(token.type, token.value, offset + token.charstart, i));
+					result.push(makeToken(token.type, token.value, offset + delta + token.charstart, i));
 				}
 			}
-				
+			
 			for (i = 0, il = tokens.length; i < il; i++) {
 				token = tokens[i];
 				acc_type = null;
 				
-				orig_tokens.push(makeToken(token.type, token.value, offset + token.charstart));
-				
 				if (token.type == 'line') {
-					offset += _o;
-					offset += content ? calculateNlLength(content, offset) : 1;
+					delta += _o;
+					nl_size = content ? calculateNlLength(content, delta) : 1;
+					
+					var tok_value = nl_size == 1 ? '\n' : '\r\n';
+					orig_tokens.push(makeToken(token.type, tok_value, offset + delta));
+					
+					result.push(makeToken(token.type, tok_value, offset + delta, i));
+					delta += nl_size;
 					_o = 0;
+					
 					continue;
 				}
+				
+				orig_tokens.push(makeToken(token.type, token.value, offset + delta + token.charstart));
 				
 //				_o = token.charend;
 				// use charstart and length because of incorrect charend 
@@ -5648,7 +5714,7 @@ var CSSEX = (function () {
 				var selector = '';
 				while (offset >= 0) {
 					ch = content.charAt(offset);
-					if (ch == '{' || ch == '}') break;
+					if (css_stop_chars.indexOf(ch) != -1) break;
 					offset--;
 				}
 				
@@ -5674,16 +5740,325 @@ var CSSEX = (function () {
  */
  
 /**
- * Reflect CSS value: takes rule's value under caret pastes it for the same rules
- * with verdor prefixes
+ * Reflect CSS value: takes rule's value under caret and pastes it for the same 
+ * rules with vendor prefixes
  * @param {zen_editor} editor
  */
 function reflectCSSValue(editor) {
 	if (editor.getSyntax() != 'css') return false;
 	
+	return compoundUpdate(editor, doCSSReflection(editor));
+}
+
+/**
+ * Update image size: reads image from image/CSS rule under caret
+ * and updates dimensions inside tag/rule
+ * @param {zen_editor} editor
+ */
+function updateImageSize(editor) {
+	var result;
+	if (String(editor.getSyntax()) == 'css') {
+		result = updateImageSizeCSS(editor);
+	} else {
+		result = updateImageSizeHTML(editor);
+	}
+	
+	return compoundUpdate(editor, result);
+}
+
+function compoundUpdate(editor, data) {
+	if (data) {
+		var sel = editor.getSelectionRange();
+		editor.replaceContent(data.data, data.start, data.end, true);
+		editor.createSelection(data.caret, data.caret + sel.end - sel.start);
+		return true;
+	}
+	
+	return false;
+}
+
+/**
+ * Updates image size of &lt;img src=""&gt; tag
+ * @param {zen_editor} editor
+ */
+function updateImageSizeHTML(editor) {
+	var offset = editor.getCaretPos();
+		
+	var image = findImage(editor);
+	if (image) {
+		var re = /\bsrc=(["'])(.+?)\1/i, m, src;
+		if (m = re.exec(image.tag))
+			src = m[2];
+		
+		if (src) {
+			var size = getImageSizeForSource(editor, src);
+			if (size) {
+				var new_tag = replaceOrAppend(image.tag, 'width', size.width);
+				new_tag = replaceOrAppend(new_tag, 'height', size.height);
+				
+				return {
+					'data': new_tag,
+					'start': image.start,
+					'end': image.end,
+					'caret': offset
+				};
+			}
+		}
+	}
+	
+	return null;
+}
+
+/**
+ * Search for insertion point for new CSS properties
+ * @param {ParserUtils.token[]} tokens
+ * @param {Number} start_ix Token index where to start searching
+ */
+function findCSSInsertionPoint(tokens, start_ix) {
+	var ins_point, 
+		ins_ix = -1, 
+		need_col = false;
+		
+	for (var i = start_ix, il = tokens.length; i < il; i++) {
+		var t = tokens[i];
+		if (t.type == 'value') {
+			ins_point = t;
+			ins_ix = i;
+			// look ahead fo rule termination
+			if (tokens[i + 1] && tokens[i + 1].type == ';') {
+				ins_point = tokens[i + 1];
+				ins_ix += 1;
+			} else {
+				need_col = true;
+			}
+			break;
+		}
+	}
+	
+	return {
+		token: ins_point,
+		ix: ins_ix,
+		need_col: need_col
+	};
+}
+
+/**
+ * Updates image size of CSS rule
+ * @param {zen_editor} editor
+ */
+function updateImageSizeCSS(editor) {
+	var caret_pos = editor.getCaretPos(),
+		content = String(editor.getContent()),
+		rule = ParserUtils.extractCSSRule(content, caret_pos, true);
+		
+	
+	if (rule) {
+		var css = ParserUtils.parseCSS(content.substring(rule[0], rule[1]), rule[0]),
+			cur_token = findTokenFromPosition(css, caret_pos, 'identifier'),
+			value = findValueToken(css, cur_token + 1),
+			m;
+			
+		if (!value) return false;
+		
+		// find inserion point
+		var ins_point = findCSSInsertionPoint(css, cur_token);
+			
+		if (m = /url\((["']?)(.+?)\1\)/i.exec(value.content)) {
+			var size = getImageSizeForSource(editor, m[2]);
+			if (size) {
+				var wh = {width: null, height: null},
+					updates = [],
+					styler = learnCSSStyle(css, cur_token);
+					
+				for (var i = 0, il = css.length; i < il; i++) {
+					if (css[i].type == 'identifier' && css[i].content in wh)
+						wh[css[i].content] = i;
+				}
+				
+				function update(name, val) {
+					var v;
+					if (wh[name] !== null && (v = findValueToken(css, wh[name] + 1))) {
+						updates.push([v.start, v.end, val + 'px']);
+					} else {
+						updates.push([ins_point.token.end, ins_point.token.end, styler(name, val + 'px')]);
+					}
+				}
+				
+				update('width', size.width);
+				update('height', size.height);
+				
+				if (updates.length) {
+					updates.sort(function(a, b){return a[0] - b[0]});
+					
+					// some editors do not provide easy way to replace multiple code 
+					// fragments so we have to squash all replace operations into one
+					var data = content.substring(updates[0][0], updates[updates.length - 1][1]),
+						offset = updates[0][0];
+						
+					for (var i = updates.length - 1; i >= 0; i--) {
+						var u = updates[i];
+						data = replaceSubstring(data, u[0] - offset, u[1] - offset, u[2]);
+							
+						// also calculate new caret position
+						if (u[0] < caret_pos)
+							caret_pos += u[2].length - u[1] + u[0];
+					}
+					
+					if (ins_point.need_col)
+						data = replaceSubstring(data, ins_point.token.end - offset, ins_point.token.end - offset, ';');
+					
+					return {
+						'data': data,
+						'start': offset,
+						'end': updates[updates.length - 1][1],
+						'caret': caret_pos
+					};
+					
+				}
+			}
+		}
+	}
+		
+	return false;
+}
+
+/**
+ * Learns formatting style from parsed tokens
+ * @param {ParserUtils.token[]} tokens List of tokens
+ * @param {Number} pos Identifier token position, from which style should be learned
+ * @returns {Function} Function with <code>(name, value)</code> arguments that will create
+ * CSS rule based on learned formatting
+ */
+function learnCSSStyle(tokens, pos) {
+	var prefix = '', glue = '', i, il;
+	
+	// use original tokens instead of optimized ones
+	pos = tokens[pos].ref_start_ix;
+	tokens = tokens.__original;
+	
+	// learn prefix
+	for (i = pos - 1; i >= 0; i--) {
+		if (tokens[i].type == 'white') {
+			prefix = tokens[i].content + prefix;
+		} else if (tokens[i].type == 'line') {
+			prefix = tokens[i].content + prefix;
+			break;
+		} else {
+			break;
+		}
+	}
+	
+	// learn glue
+	for (i = pos + 1, il = tokens.length; i < il; i++) {
+		if (tokens[i].type == 'white' || tokens[i].type == ':')
+			glue += tokens[i].content;
+		else break;
+	}
+	
+	if (glue.indexOf(':') == -1)
+		glue = ':';
+	
+	return function(name, value) {
+		return prefix + name + glue + value + ';';
+	};
+}
+
+/**
+ * Returns image dimentions for source
+ * @param {zen_editor} editor
+ * @param {String} src Image source (path or data:url)
+ */
+function getImageSizeForSource(editor, src) {
+	var f_content;
+	if (src) {
+		// check if it is data:url
+		if (startsWith('data:', src)) {
+			f_content = base64.decode( src.replace(/^data\:.+?;.+?,/, '') );
+		} else {
+			var abs_path = zen_file.locateFile(editor.getFilePath(), src);
+			if (abs_path === null) {
+				throw "Can't find " + src + ' file';
+			}
+			
+			f_content = String(zen_file.read(abs_path));
+		}
+		
+		return zen_coding.getImageSize(f_content);
+	}
+}
+
+/**
+ * Find image tag under caret
+ * @param {zen_editor} editor
+ * @return Image tag and its indexes inside editor source
+ */
+function findImage(editor) {
+	var caret_pos = editor.getCaretPos(),
+		content = String(editor.getContent()),
+		content_len = content.length,
+		start_ix = -1,
+		end_ix = -1;
+	
+	// find the beginning of the tag
+	do {
+		if (caret_pos < 0)
+			break;
+		if (content.charAt(caret_pos) == '<') {
+			if (content.substring(caret_pos, caret_pos + 4).toLowerCase() == '<img') {
+				// found the beginning of the image tag
+				start_ix = caret_pos;
+				break;
+			} else {
+				// found some other tag
+				return null;
+			}
+		}
+	} while(caret_pos--);
+	
+	// find the end of the tag 
+	caret_pos = editor.getCaretPos();
+	do {
+		if (caret_pos >= content_len)
+			break;
+			
+		if (content.charAt(caret_pos) == '>') {
+			end_ix = caret_pos + 1;
+			break;
+		}
+	} while(caret_pos++);
+	
+	if (start_ix != -1 && end_ix != -1)
+		
+		return {
+			start: start_ix,
+			end: end_ix,
+			tag: content.substring(start_ix, end_ix)
+		};
+	
+	return null;
+}
+
+/**
+ * Replaces or adds attribute to the tag
+ * @param {String} img_tag
+ * @param {String} attr_name
+ * @param {String} attr_value
+ */
+function replaceOrAppend(img_tag, attr_name, attr_value) {
+	if (img_tag.toLowerCase().indexOf(attr_name) != -1) {
+		// attribute exists
+		var re = new RegExp(attr_name + '=([\'"])(.*?)([\'"])', 'i');
+		return img_tag.replace(re, function(str, p1, p2){
+			return attr_name + '=' + p1 + attr_value + p1;
+		});
+	} else {
+		return img_tag.replace(/\s*(\/?>)$/, ' ' + attr_name + '="' + attr_value + '" $1');
+	}
+}
+
+function doCSSReflection(editor) {
 	var content = String(editor.getContent()),
 		caret_pos = editor.getCaretPos(),
-		sel = editor.getSelectionRange(),
 		css = ParserUtils.extractCSSRule(content, caret_pos),
 		v;
 		
@@ -5719,28 +6094,31 @@ function reflectCSSValue(editor) {
 		if (values.length) {
 			var data = content.substring(values[0].value.start, values[values.length - 1].value.end),
 				offset = values[0].value.start,
-				value = value_token.content;
+				value = value_token.content,
+				rv;
 				
 			for (var i = values.length - 1; i >= 0; i--) {
 				v = values[i].value;
-				data = replaceSubstring(data, v.start - offset, v.end - offset, 
-					getReflectedValue(cur_prop, value, values[i].name.content, v.content));
+				rv = getReflectedValue(cur_prop, value, values[i].name.content, v.content);
+				data = replaceSubstring(data, v.start - offset, v.end - offset, rv);
 					
 				// also calculate new caret position
 				if (v.start < caret_pos) {
-					caret_pos += value.length - v.end + v.start;
+					caret_pos += rv.length - v.content.length;
 				}
 			}
 			
-			editor.replaceContent(data, offset, values[values.length - 1].value.end, true);
-			editor.createSelection(caret_pos, caret_pos + sel.end - sel.start);
-			
-			return true;
+			return {
+				'data': data,
+				'start': offset,
+				'end': values[values.length - 1].value.end,
+				'caret': caret_pos
+			};
 		}
 	}
-	
-	return false;
 }
+
+zen_coding.actions.doCSSReflection = doCSSReflection;
 
 /**
  * Removes vendor prefix from CSS property
@@ -5861,10 +6239,11 @@ function findTokenFromPosition(tokens, pos, type) {
 	return -1;
 }
 
-zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
+zen_coding.registerAction('reflect_css_value', reflectCSSValue);
+zen_coding.registerAction('update_image_size', updateImageSize);/**
  * Actions that use stream parsers and tokenizers for traversing:
- * -- Search for next/previuos items in HTML
- * -- Search for next/previuos items in CSS
+ * -- Search for next/previous items in HTML
+ * -- Search for next/previous items in CSS
  * 
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
@@ -6319,8 +6698,9 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 			node.end = node.end.replace(/>/, '>' + nl + padding + '<!-- /' + comment_str + ' -->');
 			
 			// replace counters
-			node.start = zen_coding.replaceCounter(node.start, i + 1);
-			node.end = zen_coding.replaceCounter(node.end, i + 1);
+			var counter = zen_coding.getCounterForNode(node);
+			node.start = zen_coding.replaceCounter(node.start, counter);
+			node.end = zen_coding.replaceCounter(node.end, counter);
 		}
 	}
 	
@@ -6411,7 +6791,7 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 			
 			// CSS properties are always snippets 
 			if (item.type == 'snippet') {
-				item.start = item.start.replace(/([\w\-]+\s*:)\s*/, '$1 ');
+				item.start = item.start.replace(/([\w\-]+\s*:)(?!:)\s*/, '$1 ');
 			}
 			
 			process(item, profile);
@@ -6577,6 +6957,8 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 					
 				} else if (item.isInline() && hasBlockSibling(item) && !isVeryFirstChild(item)) {
 					item.start = getNewline() + padding + item.start;
+				} else if (item.isInline() && item.hasBlockChildren()) {
+					item.end = getNewline() + padding + item.end;
 				}
 				
 				item.padding = padding + getIndentation();
@@ -6688,6 +7070,16 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 		item.start = item.start.replace('%s', zen_coding.padString(start, padding));
 		item.end = item.end.replace('%s', zen_coding.padString(end, padding));
 		
+		// replace variables ID and CLASS
+		var cb = function(str, var_name) {
+			if (var_name == 'id' || var_name == 'class')
+				return item.getAttribute(var_name);
+			else
+				return str;
+		};
+		item.start = zen_coding.replaceVariables(item.start, cb);
+		item.end = zen_coding.replaceVariables(item.end, cb);
+		
 		return item;
 	}
 	
@@ -6764,8 +7156,9 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 				: processSnippet(item, profile, level);
 			
 			// replace counters
-			item.start = zen_coding.unescapeText(zen_coding.replaceCounter(item.start, item.counter));
-			item.end = zen_coding.unescapeText(zen_coding.replaceCounter(item.end, item.counter));
+			var counter = zen_coding.getCounterForNode(item);
+			item.start = zen_coding.unescapeText(zen_coding.replaceCounter(item.start, counter));
+			item.end = zen_coding.unescapeText(zen_coding.replaceCounter(item.end, counter));
 			
 			process(item, profile, level + 1);
 		}
@@ -6843,6 +7236,16 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 			
 		item.start = item.start.replace('%s', zen_coding.padString(start, padding));
 		item.end = item.end.replace('%s', zen_coding.padString(end, padding));
+		
+		// replace variables ID and CLASS
+		var cb = function(str, var_name) {
+			if (var_name == 'id' || var_name == 'class')
+				return item.getAttribute(var_name);
+			else
+				return str;
+		};
+		item.start = zen_coding.replaceVariables(item.start, cb);
+		item.end = zen_coding.replaceVariables(item.end, cb);
 		
 		return item;
 	}
@@ -6930,9 +7333,10 @@ zen_coding.registerAction('reflect_css_value', reflectCSSValue);/**
 				: processSnippet(item, profile, level);
 			
 			// replace counters
-			item.start = zen_coding.unescapeText(zen_coding.replaceCounter(item.start, item.counter));
-			item.end = zen_coding.unescapeText(zen_coding.replaceCounter(item.end, item.counter));
-			item.content = zen_coding.unescapeText(zen_coding.replaceCounter(item.content, item.counter));
+			var counter = zen_coding.getCounterForNode(item);
+			item.start = zen_coding.unescapeText(zen_coding.replaceCounter(item.start, counter));
+			item.end = zen_coding.unescapeText(zen_coding.replaceCounter(item.end, counter));
+			item.content = zen_coding.unescapeText(zen_coding.replaceCounter(item.content, counter));
 			
 			tabstops += zen_coding.upgradeTabstops(item, tabstops) + 1;
 			
