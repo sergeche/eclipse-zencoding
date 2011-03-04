@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.eclipse.jface.dialogs.InputDialog;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IRegion;
@@ -37,6 +36,8 @@ public class EclipseZenEditor implements IZenEditor {
 	private IEditorPart editor;
 	private IDocument doc;
 	private String caretPlaceholder = "{%::zen-caret::%}";
+	
+	private ArrayList<String> promptProposals;
 	
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
 	
@@ -71,6 +72,8 @@ public class EclipseZenEditor implements IZenEditor {
 	public void setContext(IEditorPart editor) {
 		this.editor = editor;
 		doc = EclipseZenCodingHelper.getDocument(editor);
+		if (promptProposals == null)
+			promptProposals = new ArrayList<String>();
 	}
 	
 	public boolean isValid() {
@@ -477,10 +480,14 @@ public class EclipseZenEditor implements IZenEditor {
 					Shell shell = currentDisplay.getActiveShell();
 
 					if (shell != null) {
-						InputDialog dialog = new InputDialog(null, "Zen Coding Prompt", message, defaultValue, null); //$NON-NLS-1$
+						AutoCompleteDialog dialog = new AutoCompleteDialog(null, "Zen Coding Prompt", message, defaultValue);
+						dialog.setProposals(promptProposals);
 						int dialogResult = dialog.open();
 						if (dialogResult == Window.OK) {
 							a.result = dialog.getValue();
+							if (!a.result.equals("") && !promptProposals.contains(a.result)) {
+								promptProposals.add(0, a.result);
+							}
 						} else {
 							a.result = "";
 						}
