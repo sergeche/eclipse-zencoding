@@ -25,8 +25,14 @@ public class WrapWithAbbreviationAction extends AbstractHandler {
 				OutputProfile profile = OutputProfile.createFromPreferences(syntax);
 				js.setupProfile(profileName, profile);
 				
-				// expand abbreviation with current profile
-				return js.runAction(editor, new Object[]{"wrap_with_abbreviation", null, syntax, profileName});
+				String abbr = editor.promptWrap("Enter abbreviation:");
+				
+				if (abbr != null && !abbr.equals("")) {
+					// expand abbreviation with current profile
+					return js.runAction(editor, new Object[]{"wrap_with_abbreviation", 
+							abbr, syntax, profileName});
+				}
+				
 			} catch (Exception e) {
 				e.printStackTrace();
 			}

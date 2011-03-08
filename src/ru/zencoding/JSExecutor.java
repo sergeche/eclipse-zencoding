@@ -30,6 +30,7 @@ public class JSExecutor {
 	private Function hasVariableFn;
 	private Function setupProfileFn;
 	private Function addVariableFn;
+	private Function previewWrapFn;
 	
 	protected static class NotAFunctionException extends Exception {
 		private static final long serialVersionUID = -1259543361680422950L;
@@ -91,6 +92,7 @@ public class JSExecutor {
 		hasVariableFn = getFunction("hasZenCodingVariable");
 		setupProfileFn = getFunction("setupOutputProfile");
 		addVariableFn = getFunction("addUserVariable");
+		previewWrapFn = getFunction("previewWrapWithAbbreviation");
 		
 		return true;
 	}
@@ -192,5 +194,18 @@ public class JSExecutor {
 		} else {
 			return false;
 		}
+	}
+	
+	/**
+	 * Returns preview for "Wrap with Abbreviation" action
+	 */
+	public String getWrapPreview(IZenEditor editor, String abbr) {
+		if (isInited()) {
+			Object result = previewWrapFn.call(cx, scope, scope, 
+					new Object[]{convertJavaToJs(editor), abbr});
+			return Context.toString(result);
+		}
+		
+		return null;
 	}
 }

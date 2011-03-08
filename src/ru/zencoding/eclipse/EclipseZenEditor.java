@@ -41,6 +41,11 @@ public class EclipseZenEditor implements IZenEditor {
 	
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
 	
+	private static String DIALOG_PROMPT = "prompt";
+	private static String DIALOG_WRAP_WITH_ABBREVIATION = "wrap";
+	
+	private HashMap<String, ArrayList<String>> proposals;
+	
 	private abstract interface CharTester {
 	  public abstract boolean test(char ch);
 	}
@@ -74,6 +79,9 @@ public class EclipseZenEditor implements IZenEditor {
 		doc = EclipseZenCodingHelper.getDocument(editor);
 		if (promptProposals == null)
 			promptProposals = new ArrayList<String>();
+		if (proposals == null) {
+			proposals = new HashMap<String, ArrayList<String>>();
+		}
 	}
 	
 	public boolean isValid() {
@@ -346,7 +354,6 @@ public class EclipseZenEditor implements IZenEditor {
 					startIx = i + 1;
 					i = nextWhile(startIx, text, isNumeric);
 					if (startIx < i) {
-						// TODO handle placeholder
 						strBuilder.append(handler.process(_i, i, text.substring(startIx, i), null));
 						continue;
 					}
@@ -456,8 +463,7 @@ public class EclipseZenEditor implements IZenEditor {
 		return EditorTypeInvestigator.getOutputProfile(this);
 	}
 
-	@Override
-	public String prompt(String title) {
+	public String prompt(String type, String title) {
 
 		final Display currentDisplay = Display.getCurrent();
 		String defaultValueArg = "";
@@ -470,6 +476,7 @@ public class EclipseZenEditor implements IZenEditor {
 		}
 
 		final String message = title;
+		final String dialogType = type;
 		final String defaultValue = defaultValueArg;
 		final Answer a = new Answer();
 
@@ -480,14 +487,11 @@ public class EclipseZenEditor implements IZenEditor {
 					Shell shell = currentDisplay.getActiveShell();
 
 					if (shell != null) {
-						AutoCompleteDialog dialog = new AutoCompleteDialog(null, "Zen Coding Prompt", message, defaultValue);
-						dialog.setProposals(promptProposals);
+						AutoCompleteDialog dialog = dialogFactory(dialogType, message, defaultValue);
 						int dialogResult = dialog.open();
 						if (dialogResult == Window.OK) {
 							a.result = dialog.getValue();
-							if (!a.result.equals("") && !promptProposals.contains(a.result)) {
-								promptProposals.add(0, a.result);
-							}
+							addProposal(message, a.result);
 						} else {
 							a.result = "";
 						}
@@ -497,6 +501,45 @@ public class EclipseZenEditor implements IZenEditor {
 		}
 
 		return a.result;
+	}
+	
+	@Override
+	public String prompt(String title) {
+		return prompt(DIALOG_PROMPT, title);
+	}
+	
+	public String promptWrap(String title) {
+		return prompt(DIALOG_WRAP_WITH_ABBREVIATION, title);
+	}
+	
+	private AutoCompleteDialog dialogFactory(String type, String message, String defaultValue) {
+		AutoCompleteDialog dialog;
+		if (type == DIALOG_WRAP_WITH_ABBREVIATION) {
+			dialog = new WrapWithAbbreviationDialog(null, "Zen Coding Prompt", message, defaultValue);
+		} else {
+			dialog = new AutoCompleteDialog(null, "Zen Coding Prompt", message, defaultValue);
+		}
+		
+		dialog.setProposals(getProposals(message));
+		return dialog;
+	}
+	
+	private ArrayList<String> getProposals(String title) {
+		if (proposals.containsKey(title))
+			return proposals.get(title);
+		
+		return null;
+	}
+	
+	private void addProposal(String title, String value) {
+		if (!value.equals("")) {
+			if (!proposals.containsKey(title))
+				proposals.put(title, new ArrayList<String>());
+			
+			ArrayList<String> props = proposals.get(title);
+			if (!props.contains(value))
+				props.add(0, value);
+		}
 	}
 
 	@Override
@@ -532,5 +575,14 @@ public class EclipseZenEditor implements IZenEditor {
 	
 	public void print(String msg) {
 		System.out.println("ZC: " + msg);
+	}
+	
+	/**
+	 * Removes caret placeholders and tabstops from text
+	 * @param text
+	 * @return
+	 */
+	public String cleanText(String text) {
+		return handleTabStops(text).getText();
 	}
 }
