@@ -2644,6 +2644,7 @@ try {
 		extractAbbreviation: function(str) {
 			var cur_offset = str.length,
 				start_index = -1,
+				group_count = 0,
 				brace_count = 0,
 				text_count = 0;
 			
@@ -2657,15 +2658,31 @@ try {
 				
 				var ch = str.charAt(cur_offset);
 				
-				if (ch == ']')
+				if (ch == ']') {
 					brace_count++;
-				else if (ch == '[')
+				} else if (ch == '[') {
+					if (!brace_count) { // unexpected brace
+						start_index = cur_offset + 1;
+						break;
+					}
 					brace_count--;
-				if (ch == '}')
+				} else if (ch == '}') {
 					text_count++;
-				else if (ch == '{')
+				} else if (ch == '{') {
+					if (!text_count) { // unexpected brace
+						start_index = cur_offset + 1;
+						break;
+					}
 					text_count--;
-				else {
+				} else if (ch == ')') {
+					group_count++;
+				} else if (ch == '(') {
+					if (!group_count) { // unexpected brace
+						start_index = cur_offset + 1;
+						break;
+					}
+					group_count--;
+				} else {
 					if (brace_count || text_count) 
 						// respect all characters inside attribute sets or text nodes
 						continue;
@@ -2677,8 +2694,8 @@ try {
 				}
 			}
 			
-			if (start_index != -1) 
-				// found somethind, return abbreviation
+			if (start_index != -1 && !text_count && !brace_count && !group_count) 
+				// found something, return abbreviation
 				return str.substring(start_index);
 			else
 				return '';
@@ -2748,13 +2765,21 @@ try {
 		 */
 		wrapWithAbbreviation: function(abbr, text, type, profile) {
 			type = type || 'html';
-			var tree_root = this.parseIntoTree(abbr, type);
+			var tree_root = this.parseIntoTree(abbr, type),
+				pasted = false;
+				
 			if (tree_root) {
-				var repeat_elem = tree_root.multiply_elem || tree_root.last;
-				repeat_elem.setPasteContent(text);
-				repeat_elem.repeat_by_lines = !!tree_root.multiply_elem;
+				if (tree_root.multiply_elem) {
+					// we have a repeating element, put content in
+					tree_root.multiply_elem.setPasteContent(text);
+					tree_root.multiply_elem.repeat_by_lines = pasted = true;
+				}
 				
 				var tree = rolloutTree(tree_root);
+				
+				if (!pasted) 
+					tree.pasteContent(text);
+				
 				this.applyFilters(tree, type, profile, tree_root.filters);
 				return replaceVariables(tree.toString());
 			}
