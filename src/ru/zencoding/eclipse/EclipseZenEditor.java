@@ -228,27 +228,7 @@ public class EclipseZenEditor implements IZenEditor {
 	 * indexes for linked mode
 	 */
 	private TabStopStructure handleTabStops(String text) {
-		ArrayList<Integer> carets = new ArrayList<Integer>();
-		
-		// find all carets
-		if (text.equals(getCaretPlaceholder())) {
-			carets.add(0);
-			text = "";
-		} else {
-			String[] chunks = text.split(Pattern.quote(getCaretPlaceholder()), -1);
-			int offset = 0;
-			StringBuilder buf = new StringBuilder();
-			
-			if (chunks.length > 1) {
-				for (int i = 0; i < chunks.length - 1; i++) {
-					offset += chunks[i].length();
-					carets.add(offset);
-					buf.append(chunks[i]);
-				}
-				
-				text = buf.toString() + chunks[chunks.length - 1];
-			}
-		}
+		text = text.replaceAll(Pattern.quote(getCaretPlaceholder()), "\\${0:cursor}");
 		
 		// process all tab-stops
 		final HashMap<String, String> placeholders = new HashMap<String, String>();
@@ -260,14 +240,17 @@ public class EclipseZenEditor implements IZenEditor {
 			@Override
 			public String process(int start, int end, String num, String placeholder) {
 				String ret = "";
-				if (placeholder != null)
-					placeholders.put(num, placeholder);
+				if (placeholder != null && placeholder.equals("cursor")) {
+					pMarks.add(start, end, "carets", "");
+				} else {
+					if (placeholder != null)
+						placeholders.put(num, placeholder);
 					
-				if (placeholders.containsKey(num))
-					ret = placeholders.get(num);
-				
-				pMarks.add(start, end, num, ret);
-				
+					if (placeholders.containsKey(num))
+						ret = placeholders.get(num);
+					
+					pMarks.add(start, end, num, ret);
+				}
 				return originalText.substring(start, end);
 			}	
 		});
@@ -282,7 +265,7 @@ public class EclipseZenEditor implements IZenEditor {
 			buf.append(text.substring(lastIx, p.getStart()));
 			
 			String ph = "";
-			if (placeholders.containsKey(p.getNum()))
+			if (!p.getNum().equals("carets") && placeholders.containsKey(p.getNum()))
 				ph = placeholders.get(p.getNum());
 			
 			tabStops.addTabStopToGroup(p.getNum(), buf.length(), buf.length() + ph.length());
@@ -291,11 +274,6 @@ public class EclipseZenEditor implements IZenEditor {
 			lastIx = p.getEnd();
 		}
 		buf.append(text.substring(lastIx));
-		
-		// add carets
-		for (Integer caretPos : carets) {
-			tabStops.addTabStopToGroup("carets", (int) caretPos, (int) caretPos);
-		}
 		
 		tabStops.setText(buf.toString());
 		
@@ -455,7 +433,10 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public String getSyntax() {
-		return EditorTypeInvestigator.getSyntax(this);
+		String syntax = EditorTypeInvestigator.getSyntax(this);
+		if (syntax == null)
+			syntax = EditorTypeInvestigator.TYPE_HTML;
+		return syntax;
 	}
 
 	@Override

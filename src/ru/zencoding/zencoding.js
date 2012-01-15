@@ -1,3 +1,984 @@
+//     Underscore.js 1.2.3
+//     (c) 2009-2011 Jeremy Ashkenas, DocumentCloud Inc.
+//     Underscore is freely distributable under the MIT license.
+//     Portions of Underscore are inspired or borrowed from Prototype,
+//     Oliver Steele's Functional, and John Resig's Micro-Templating.
+//     For all details and documentation:
+//     http://documentcloud.github.com/underscore
+
+(function() {
+
+  // Baseline setup
+  // --------------
+
+  // Establish the root object, `window` in the browser, or `global` on the server.
+  var root = this;
+
+  // Save the previous value of the `_` variable.
+  var previousUnderscore = root._;
+
+  // Establish the object that gets returned to break out of a loop iteration.
+  var breaker = {};
+
+  // Save bytes in the minified (but not gzipped) version:
+  var ArrayProto = Array.prototype, ObjProto = Object.prototype, FuncProto = Function.prototype;
+
+  // Create quick reference variables for speed access to core prototypes.
+  var slice            = ArrayProto.slice,
+      concat           = ArrayProto.concat,
+      unshift          = ArrayProto.unshift,
+      toString         = ObjProto.toString,
+      hasOwnProperty   = ObjProto.hasOwnProperty;
+
+  // All **ECMAScript 5** native function implementations that we hope to use
+  // are declared here.
+  var
+    nativeForEach      = ArrayProto.forEach,
+    nativeMap          = ArrayProto.map,
+    nativeReduce       = ArrayProto.reduce,
+    nativeReduceRight  = ArrayProto.reduceRight,
+    nativeFilter       = ArrayProto.filter,
+    nativeEvery        = ArrayProto.every,
+    nativeSome         = ArrayProto.some,
+    nativeIndexOf      = ArrayProto.indexOf,
+    nativeLastIndexOf  = ArrayProto.lastIndexOf,
+    nativeIsArray      = Array.isArray,
+    nativeKeys         = Object.keys,
+    nativeBind         = FuncProto.bind;
+
+  // Create a safe reference to the Underscore object for use below.
+  var _ = function(obj) { return new wrapper(obj); };
+
+  // Export the Underscore object for **Node.js** and **"CommonJS"**, with
+  // backwards-compatibility for the old `require()` API. If we're not in
+  // CommonJS, add `_` to the global object.
+  if (typeof exports !== 'undefined') {
+    if (typeof module !== 'undefined' && module.exports) {
+      exports = module.exports = _;
+    }
+    exports._ = _;
+  } else if (typeof define === 'function' && define.amd) {
+    // Register as a named module with AMD.
+    define('underscore', function() {
+      return _;
+    });
+  } else {
+    // Exported as a string, for Closure Compiler "advanced" mode.
+    root['_'] = _;
+  }
+
+  // Current version.
+  _.VERSION = '1.2.3';
+
+  // Collection Functions
+  // --------------------
+
+  // The cornerstone, an `each` implementation, aka `forEach`.
+  // Handles objects with the built-in `forEach`, arrays, and raw objects.
+  // Delegates to **ECMAScript 5**'s native `forEach` if available.
+  var each = _.each = _.forEach = function(obj, iterator, context) {
+    if (obj == null) return;
+    if (nativeForEach && obj.forEach === nativeForEach) {
+      obj.forEach(iterator, context);
+    } else if (obj.length === +obj.length) {
+      for (var i = 0, l = obj.length; i < l; i++) {
+        if (i in obj && iterator.call(context, obj[i], i, obj) === breaker) return;
+      }
+    } else {
+      for (var key in obj) {
+        if (hasOwnProperty.call(obj, key)) {
+          if (iterator.call(context, obj[key], key, obj) === breaker) return;
+        }
+      }
+    }
+  };
+
+  // Return the results of applying the iterator to each element.
+  // Delegates to **ECMAScript 5**'s native `map` if available.
+  _.map = function(obj, iterator, context) {
+    var results = [];
+    if (obj == null) return results;
+    if (nativeMap && obj.map === nativeMap) return obj.map(iterator, context);
+    each(obj, function(value, index, list) {
+      results[results.length] = iterator.call(context, value, index, list);
+    });
+    return results;
+  };
+
+  // **Reduce** builds up a single result from a list of values, aka `inject`,
+  // or `foldl`. Delegates to **ECMAScript 5**'s native `reduce` if available.
+  _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
+    var initial = arguments.length > 2;
+    if (obj == null) obj = [];
+    if (nativeReduce && obj.reduce === nativeReduce) {
+      if (context) iterator = _.bind(iterator, context);
+      return initial ? obj.reduce(iterator, memo) : obj.reduce(iterator);
+    }
+    each(obj, function(value, index, list) {
+      if (!initial) {
+        memo = value;
+        initial = true;
+      } else {
+        memo = iterator.call(context, memo, value, index, list);
+      }
+    });
+    if (!initial) throw new TypeError('Reduce of empty array with no initial value');
+    return memo;
+  };
+
+  // The right-associative version of reduce, also known as `foldr`.
+  // Delegates to **ECMAScript 5**'s native `reduceRight` if available.
+  _.reduceRight = _.foldr = function(obj, iterator, memo, context) {
+    var initial = arguments.length > 2;
+    if (obj == null) obj = [];
+    if (nativeReduceRight && obj.reduceRight === nativeReduceRight) {
+      if (context) iterator = _.bind(iterator, context);
+      return initial ? obj.reduceRight(iterator, memo) : obj.reduceRight(iterator);
+    }
+    var reversed = _.toArray(obj).reverse();
+    if (context && !initial) iterator = _.bind(iterator, context);
+    return initial ? _.reduce(reversed, iterator, memo, context) : _.reduce(reversed, iterator);
+  };
+
+  // Return the first value which passes a truth test. Aliased as `detect`.
+  _.find = _.detect = function(obj, iterator, context) {
+    var result;
+    any(obj, function(value, index, list) {
+      if (iterator.call(context, value, index, list)) {
+        result = value;
+        return true;
+      }
+    });
+    return result;
+  };
+
+  // Return all the elements that pass a truth test.
+  // Delegates to **ECMAScript 5**'s native `filter` if available.
+  // Aliased as `select`.
+  _.filter = _.select = function(obj, iterator, context) {
+    var results = [];
+    if (obj == null) return results;
+    if (nativeFilter && obj.filter === nativeFilter) return obj.filter(iterator, context);
+    each(obj, function(value, index, list) {
+      if (iterator.call(context, value, index, list)) results[results.length] = value;
+    });
+    return results;
+  };
+
+  // Return all the elements for which a truth test fails.
+  _.reject = function(obj, iterator, context) {
+    var results = [];
+    if (obj == null) return results;
+    each(obj, function(value, index, list) {
+      if (!iterator.call(context, value, index, list)) results[results.length] = value;
+    });
+    return results;
+  };
+
+  // Determine whether all of the elements match a truth test.
+  // Delegates to **ECMAScript 5**'s native `every` if available.
+  // Aliased as `all`.
+  _.every = _.all = function(obj, iterator, context) {
+    var result = true;
+    if (obj == null) return result;
+    if (nativeEvery && obj.every === nativeEvery) return obj.every(iterator, context);
+    each(obj, function(value, index, list) {
+      if (!(result = result && iterator.call(context, value, index, list))) return breaker;
+    });
+    return result;
+  };
+
+  // Determine if at least one element in the object matches a truth test.
+  // Delegates to **ECMAScript 5**'s native `some` if available.
+  // Aliased as `any`.
+  var any = _.some = _.any = function(obj, iterator, context) {
+    iterator || (iterator = _.identity);
+    var result = false;
+    if (obj == null) return result;
+    if (nativeSome && obj.some === nativeSome) return obj.some(iterator, context);
+    each(obj, function(value, index, list) {
+      if (result || (result = iterator.call(context, value, index, list))) return breaker;
+    });
+    return !!result;
+  };
+
+  // Determine if a given value is included in the array or object using `===`.
+  // Aliased as `contains`.
+  _.include = _.contains = function(obj, target) {
+    var found = false;
+    if (obj == null) return found;
+    if (nativeIndexOf && obj.indexOf === nativeIndexOf) return obj.indexOf(target) != -1;
+    found = any(obj, function(value) {
+      return value === target;
+    });
+    return found;
+  };
+
+  // Invoke a method (with arguments) on every item in a collection.
+  _.invoke = function(obj, method) {
+    var args = slice.call(arguments, 2);
+    return _.map(obj, function(value) {
+      return (method.call ? method || value : value[method]).apply(value, args);
+    });
+  };
+
+  // Convenience version of a common use case of `map`: fetching a property.
+  _.pluck = function(obj, key) {
+    return _.map(obj, function(value){ return value[key]; });
+  };
+
+  // Return the maximum element or (element-based computation).
+  _.max = function(obj, iterator, context) {
+    if (!iterator && _.isArray(obj)) return Math.max.apply(Math, obj);
+    if (!iterator && _.isEmpty(obj)) return -Infinity;
+    var result = {computed : -Infinity};
+    each(obj, function(value, index, list) {
+      var computed = iterator ? iterator.call(context, value, index, list) : value;
+      computed >= result.computed && (result = {value : value, computed : computed});
+    });
+    return result.value;
+  };
+
+  // Return the minimum element (or element-based computation).
+  _.min = function(obj, iterator, context) {
+    if (!iterator && _.isArray(obj)) return Math.min.apply(Math, obj);
+    if (!iterator && _.isEmpty(obj)) return Infinity;
+    var result = {computed : Infinity};
+    each(obj, function(value, index, list) {
+      var computed = iterator ? iterator.call(context, value, index, list) : value;
+      computed < result.computed && (result = {value : value, computed : computed});
+    });
+    return result.value;
+  };
+
+  // Shuffle an array.
+  _.shuffle = function(obj) {
+    var shuffled = [], rand;
+    each(obj, function(value, index, list) {
+      if (index == 0) {
+        shuffled[0] = value;
+      } else {
+        rand = Math.floor(Math.random() * (index + 1));
+        shuffled[index] = shuffled[rand];
+        shuffled[rand] = value;
+      }
+    });
+    return shuffled;
+  };
+
+  // Sort the object's values by a criterion produced by an iterator.
+  _.sortBy = function(obj, iterator, context) {
+    return _.pluck(_.map(obj, function(value, index, list) {
+      return {
+        value : value,
+        criteria : iterator.call(context, value, index, list)
+      };
+    }).sort(function(left, right) {
+      var a = left.criteria, b = right.criteria;
+      return a < b ? -1 : a > b ? 1 : 0;
+    }), 'value');
+  };
+
+  // Groups the object's values by a criterion. Pass either a string attribute
+  // to group by, or a function that returns the criterion.
+  _.groupBy = function(obj, val) {
+    var result = {};
+    var iterator = _.isFunction(val) ? val : function(obj) { return obj[val]; };
+    each(obj, function(value, index) {
+      var key = iterator(value, index);
+      (result[key] || (result[key] = [])).push(value);
+    });
+    return result;
+  };
+
+  // Use a comparator function to figure out at what index an object should
+  // be inserted so as to maintain order. Uses binary search.
+  _.sortedIndex = function(array, obj, iterator) {
+    iterator || (iterator = _.identity);
+    var low = 0, high = array.length;
+    while (low < high) {
+      var mid = (low + high) >> 1;
+      iterator(array[mid]) < iterator(obj) ? low = mid + 1 : high = mid;
+    }
+    return low;
+  };
+
+  // Safely convert anything iterable into a real, live array.
+  _.toArray = function(iterable) {
+    if (!iterable)                return [];
+    if (iterable.toArray)         return iterable.toArray();
+    if (_.isArray(iterable))      return slice.call(iterable);
+    if (_.isArguments(iterable))  return slice.call(iterable);
+    return _.values(iterable);
+  };
+
+  // Return the number of elements in an object.
+  _.size = function(obj) {
+    return _.toArray(obj).length;
+  };
+
+  // Array Functions
+  // ---------------
+
+  // Get the first element of an array. Passing **n** will return the first N
+  // values in the array. Aliased as `head`. The **guard** check allows it to work
+  // with `_.map`.
+  _.first = _.head = function(array, n, guard) {
+    return (n != null) && !guard ? slice.call(array, 0, n) : array[0];
+  };
+
+  // Returns everything but the last entry of the array. Especcialy useful on
+  // the arguments object. Passing **n** will return all the values in
+  // the array, excluding the last N. The **guard** check allows it to work with
+  // `_.map`.
+  _.initial = function(array, n, guard) {
+    return slice.call(array, 0, array.length - ((n == null) || guard ? 1 : n));
+  };
+
+  // Get the last element of an array. Passing **n** will return the last N
+  // values in the array. The **guard** check allows it to work with `_.map`.
+  _.last = function(array, n, guard) {
+    if ((n != null) && !guard) {
+      return slice.call(array, Math.max(array.length - n, 0));
+    } else {
+      return array[array.length - 1];
+    }
+  };
+
+  // Returns everything but the first entry of the array. Aliased as `tail`.
+  // Especially useful on the arguments object. Passing an **index** will return
+  // the rest of the values in the array from that index onward. The **guard**
+  // check allows it to work with `_.map`.
+  _.rest = _.tail = function(array, index, guard) {
+    return slice.call(array, (index == null) || guard ? 1 : index);
+  };
+
+  // Trim out all falsy values from an array.
+  _.compact = function(array) {
+    return _.filter(array, function(value){ return !!value; });
+  };
+
+  // Return a completely flattened version of an array.
+  _.flatten = function(array, shallow) {
+    return _.reduce(array, function(memo, value) {
+      if (_.isArray(value)) return memo.concat(shallow ? value : _.flatten(value));
+      memo[memo.length] = value;
+      return memo;
+    }, []);
+  };
+
+  // Return a version of the array that does not contain the specified value(s).
+  _.without = function(array) {
+    return _.difference(array, slice.call(arguments, 1));
+  };
+
+  // Produce a duplicate-free version of the array. If the array has already
+  // been sorted, you have the option of using a faster algorithm.
+  // Aliased as `unique`.
+  _.uniq = _.unique = function(array, isSorted, iterator) {
+    var initial = iterator ? _.map(array, iterator) : array;
+    var result = [];
+    _.reduce(initial, function(memo, el, i) {
+      if (0 == i || (isSorted === true ? _.last(memo) != el : !_.include(memo, el))) {
+        memo[memo.length] = el;
+        result[result.length] = array[i];
+      }
+      return memo;
+    }, []);
+    return result;
+  };
+
+  // Produce an array that contains the union: each distinct element from all of
+  // the passed-in arrays.
+  _.union = function() {
+    return _.uniq(_.flatten(arguments, true));
+  };
+
+  // Produce an array that contains every item shared between all the
+  // passed-in arrays. (Aliased as "intersect" for back-compat.)
+  _.intersection = _.intersect = function(array) {
+    var rest = slice.call(arguments, 1);
+    return _.filter(_.uniq(array), function(item) {
+      return _.every(rest, function(other) {
+        return _.indexOf(other, item) >= 0;
+      });
+    });
+  };
+
+  // Take the difference between one array and a number of other arrays.
+  // Only the elements present in just the first array will remain.
+  _.difference = function(array) {
+    var rest = _.flatten(slice.call(arguments, 1));
+    return _.filter(array, function(value){ return !_.include(rest, value); });
+  };
+
+  // Zip together multiple lists into a single array -- elements that share
+  // an index go together.
+  _.zip = function() {
+    var args = slice.call(arguments);
+    var length = _.max(_.pluck(args, 'length'));
+    var results = new Array(length);
+    for (var i = 0; i < length; i++) results[i] = _.pluck(args, "" + i);
+    return results;
+  };
+
+  // If the browser doesn't supply us with indexOf (I'm looking at you, **MSIE**),
+  // we need this function. Return the position of the first occurrence of an
+  // item in an array, or -1 if the item is not included in the array.
+  // Delegates to **ECMAScript 5**'s native `indexOf` if available.
+  // If the array is large and already in sort order, pass `true`
+  // for **isSorted** to use binary search.
+  _.indexOf = function(array, item, isSorted) {
+    if (array == null) return -1;
+    var i, l;
+    if (isSorted) {
+      i = _.sortedIndex(array, item);
+      return array[i] === item ? i : -1;
+    }
+    if (nativeIndexOf && array.indexOf === nativeIndexOf) return array.indexOf(item);
+    for (i = 0, l = array.length; i < l; i++) if (i in array && array[i] === item) return i;
+    return -1;
+  };
+
+  // Delegates to **ECMAScript 5**'s native `lastIndexOf` if available.
+  _.lastIndexOf = function(array, item) {
+    if (array == null) return -1;
+    if (nativeLastIndexOf && array.lastIndexOf === nativeLastIndexOf) return array.lastIndexOf(item);
+    var i = array.length;
+    while (i--) if (i in array && array[i] === item) return i;
+    return -1;
+  };
+
+  // Generate an integer Array containing an arithmetic progression. A port of
+  // the native Python `range()` function. See
+  // [the Python documentation](http://docs.python.org/library/functions.html#range).
+  _.range = function(start, stop, step) {
+    if (arguments.length <= 1) {
+      stop = start || 0;
+      start = 0;
+    }
+    step = arguments[2] || 1;
+
+    var len = Math.max(Math.ceil((stop - start) / step), 0);
+    var idx = 0;
+    var range = new Array(len);
+
+    while(idx < len) {
+      range[idx++] = start;
+      start += step;
+    }
+
+    return range;
+  };
+
+  // Function (ahem) Functions
+  // ------------------
+
+  // Reusable constructor function for prototype setting.
+  var ctor = function(){};
+
+  // Create a function bound to a given object (assigning `this`, and arguments,
+  // optionally). Binding with arguments is also known as `curry`.
+  // Delegates to **ECMAScript 5**'s native `Function.bind` if available.
+  // We check for `func.bind` first, to fail fast when `func` is undefined.
+  _.bind = function bind(func, context) {
+    var bound, args;
+    if (func.bind === nativeBind && nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
+    if (!_.isFunction(func)) throw new TypeError;
+    args = slice.call(arguments, 2);
+    return bound = function() {
+      if (!(this instanceof bound)) return func.apply(context, args.concat(slice.call(arguments)));
+      ctor.prototype = func.prototype;
+      var self = new ctor;
+      var result = func.apply(self, args.concat(slice.call(arguments)));
+      if (Object(result) === result) return result;
+      return self;
+    };
+  };
+
+  // Bind all of an object's methods to that object. Useful for ensuring that
+  // all callbacks defined on an object belong to it.
+  _.bindAll = function(obj) {
+    var funcs = slice.call(arguments, 1);
+    if (funcs.length == 0) funcs = _.functions(obj);
+    each(funcs, function(f) { obj[f] = _.bind(obj[f], obj); });
+    return obj;
+  };
+
+  // Memoize an expensive function by storing its results.
+  _.memoize = function(func, hasher) {
+    var memo = {};
+    hasher || (hasher = _.identity);
+    return function() {
+      var key = hasher.apply(this, arguments);
+      return hasOwnProperty.call(memo, key) ? memo[key] : (memo[key] = func.apply(this, arguments));
+    };
+  };
+
+  // Delays a function for the given number of milliseconds, and then calls
+  // it with the arguments supplied.
+  _.delay = function(func, wait) {
+    var args = slice.call(arguments, 2);
+    return setTimeout(function(){ return func.apply(func, args); }, wait);
+  };
+
+  // Defers a function, scheduling it to run after the current call stack has
+  // cleared.
+  _.defer = function(func) {
+    return _.delay.apply(_, [func, 1].concat(slice.call(arguments, 1)));
+  };
+
+  // Returns a function, that, when invoked, will only be triggered at most once
+  // during a given window of time.
+  _.throttle = function(func, wait) {
+    var context, args, timeout, throttling, more;
+    var whenDone = _.debounce(function(){ more = throttling = false; }, wait);
+    return function() {
+      context = this; args = arguments;
+      var later = function() {
+        timeout = null;
+        if (more) func.apply(context, args);
+        whenDone();
+      };
+      if (!timeout) timeout = setTimeout(later, wait);
+      if (throttling) {
+        more = true;
+      } else {
+        func.apply(context, args);
+      }
+      whenDone();
+      throttling = true;
+    };
+  };
+
+  // Returns a function, that, as long as it continues to be invoked, will not
+  // be triggered. The function will be called after it stops being called for
+  // N milliseconds.
+  _.debounce = function(func, wait) {
+    var timeout;
+    return function() {
+      var context = this, args = arguments;
+      var later = function() {
+        timeout = null;
+        func.apply(context, args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
+
+  // Returns a function that will be executed at most one time, no matter how
+  // often you call it. Useful for lazy initialization.
+  _.once = function(func) {
+    var ran = false, memo;
+    return function() {
+      if (ran) return memo;
+      ran = true;
+      return memo = func.apply(this, arguments);
+    };
+  };
+
+  // Returns the first function passed as an argument to the second,
+  // allowing you to adjust arguments, run code before and after, and
+  // conditionally execute the original function.
+  _.wrap = function(func, wrapper) {
+    return function() {
+      var args = concat.apply([func], arguments);
+      return wrapper.apply(this, args);
+    };
+  };
+
+  // Returns a function that is the composition of a list of functions, each
+  // consuming the return value of the function that follows.
+  _.compose = function() {
+    var funcs = arguments;
+    return function() {
+      var args = arguments;
+      for (var i = funcs.length - 1; i >= 0; i--) {
+        args = [funcs[i].apply(this, args)];
+      }
+      return args[0];
+    };
+  };
+
+  // Returns a function that will only be executed after being called N times.
+  _.after = function(times, func) {
+    if (times <= 0) return func();
+    return function() {
+      if (--times < 1) { return func.apply(this, arguments); }
+    };
+  };
+
+  // Object Functions
+  // ----------------
+
+  // Retrieve the names of an object's properties.
+  // Delegates to **ECMAScript 5**'s native `Object.keys`
+  _.keys = nativeKeys || function(obj) {
+    if (obj !== Object(obj)) throw new TypeError('Invalid object');
+    var keys = [];
+    for (var key in obj) if (hasOwnProperty.call(obj, key)) keys[keys.length] = key;
+    return keys;
+  };
+
+  // Retrieve the values of an object's properties.
+  _.values = function(obj) {
+    return _.map(obj, _.identity);
+  };
+
+  // Return a sorted list of the function names available on the object.
+  // Aliased as `methods`
+  _.functions = _.methods = function(obj) {
+    var names = [];
+    for (var key in obj) {
+      if (_.isFunction(obj[key])) names.push(key);
+    }
+    return names.sort();
+  };
+
+  // Extend a given object with all the properties in passed-in object(s).
+  _.extend = function(obj) {
+    each(slice.call(arguments, 1), function(source) {
+      for (var prop in source) {
+        if (source[prop] !== void 0) obj[prop] = source[prop];
+      }
+    });
+    return obj;
+  };
+
+  // Fill in a given object with default properties.
+  _.defaults = function(obj) {
+    each(slice.call(arguments, 1), function(source) {
+      for (var prop in source) {
+        if (obj[prop] == null) obj[prop] = source[prop];
+      }
+    });
+    return obj;
+  };
+
+  // Create a (shallow-cloned) duplicate of an object.
+  _.clone = function(obj) {
+    if (!_.isObject(obj)) return obj;
+    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
+  };
+
+  // Invokes interceptor with the obj, and then returns obj.
+  // The primary purpose of this method is to "tap into" a method chain, in
+  // order to perform operations on intermediate results within the chain.
+  _.tap = function(obj, interceptor) {
+    interceptor(obj);
+    return obj;
+  };
+
+  // Internal recursive comparison function.
+  function eq(a, b, stack) {
+    // Identical objects are equal. `0 === -0`, but they aren't identical.
+    // See the Harmony `egal` proposal: http://wiki.ecmascript.org/doku.php?id=harmony:egal.
+    if (a === b) return a !== 0 || 1 / a == 1 / b;
+    // A strict comparison is necessary because `null == undefined`.
+    if (a == null || b == null) return a === b;
+    // Unwrap any wrapped objects.
+    if (a._chain) a = a._wrapped;
+    if (b._chain) b = b._wrapped;
+    // Invoke a custom `isEqual` method if one is provided.
+    if (a.isEqual && _.isFunction(a.isEqual)) return a.isEqual(b);
+    if (b.isEqual && _.isFunction(b.isEqual)) return b.isEqual(a);
+    // Compare `[[Class]]` names.
+    var className = toString.call(a);
+    if (className != toString.call(b)) return false;
+    switch (className) {
+      // Strings, numbers, dates, and booleans are compared by value.
+      case '[object String]':
+        // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
+        // equivalent to `new String("5")`.
+        return a == String(b);
+      case '[object Number]':
+        // `NaN`s are equivalent, but non-reflexive. An `egal` comparison is performed for
+        // other numeric values.
+        return a != +a ? b != +b : (a == 0 ? 1 / a == 1 / b : a == +b);
+      case '[object Date]':
+      case '[object Boolean]':
+        // Coerce dates and booleans to numeric primitive values. Dates are compared by their
+        // millisecond representations. Note that invalid dates with millisecond representations
+        // of `NaN` are not equivalent.
+        return +a == +b;
+      // RegExps are compared by their source patterns and flags.
+      case '[object RegExp]':
+        return a.source == b.source &&
+               a.global == b.global &&
+               a.multiline == b.multiline &&
+               a.ignoreCase == b.ignoreCase;
+    }
+    if (typeof a != 'object' || typeof b != 'object') return false;
+    // Assume equality for cyclic structures. The algorithm for detecting cyclic
+    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+    var length = stack.length;
+    while (length--) {
+      // Linear search. Performance is inversely proportional to the number of
+      // unique nested structures.
+      if (stack[length] == a) return true;
+    }
+    // Add the first object to the stack of traversed objects.
+    stack.push(a);
+    var size = 0, result = true;
+    // Recursively compare objects and arrays.
+    if (className == '[object Array]') {
+      // Compare array lengths to determine if a deep comparison is necessary.
+      size = a.length;
+      result = size == b.length;
+      if (result) {
+        // Deep compare the contents, ignoring non-numeric properties.
+        while (size--) {
+          // Ensure commutative equality for sparse arrays.
+          if (!(result = size in a == size in b && eq(a[size], b[size], stack))) break;
+        }
+      }
+    } else {
+      // Objects with different constructors are not equivalent.
+      if ('constructor' in a != 'constructor' in b || a.constructor != b.constructor) return false;
+      // Deep compare objects.
+      for (var key in a) {
+        if (hasOwnProperty.call(a, key)) {
+          // Count the expected number of properties.
+          size++;
+          // Deep compare each member.
+          if (!(result = hasOwnProperty.call(b, key) && eq(a[key], b[key], stack))) break;
+        }
+      }
+      // Ensure that both objects contain the same number of properties.
+      if (result) {
+        for (key in b) {
+          if (hasOwnProperty.call(b, key) && !(size--)) break;
+        }
+        result = !size;
+      }
+    }
+    // Remove the first object from the stack of traversed objects.
+    stack.pop();
+    return result;
+  }
+
+  // Perform a deep comparison to check if two objects are equal.
+  _.isEqual = function(a, b) {
+    return eq(a, b, []);
+  };
+
+  // Is a given array, string, or object empty?
+  // An "empty" object has no enumerable own-properties.
+  _.isEmpty = function(obj) {
+    if (_.isArray(obj) || _.isString(obj)) return obj.length === 0;
+    for (var key in obj) if (hasOwnProperty.call(obj, key)) return false;
+    return true;
+  };
+
+  // Is a given value a DOM element?
+  _.isElement = function(obj) {
+    return !!(obj && obj.nodeType == 1);
+  };
+
+  // Is a given value an array?
+  // Delegates to ECMA5's native Array.isArray
+  _.isArray = nativeIsArray || function(obj) {
+    return toString.call(obj) == '[object Array]';
+  };
+
+  // Is a given variable an object?
+  _.isObject = function(obj) {
+    return obj === Object(obj);
+  };
+
+  // Is a given variable an arguments object?
+  _.isArguments = function(obj) {
+    return toString.call(obj) == '[object Arguments]';
+  };
+  if (!_.isArguments(arguments)) {
+    _.isArguments = function(obj) {
+      return !!(obj && hasOwnProperty.call(obj, 'callee'));
+    };
+  }
+
+  // Is a given value a function?
+  _.isFunction = function(obj) {
+    return toString.call(obj) == '[object Function]';
+  };
+
+  // Is a given value a string?
+  _.isString = function(obj) {
+    return toString.call(obj) == '[object String]';
+  };
+
+  // Is a given value a number?
+  _.isNumber = function(obj) {
+    return toString.call(obj) == '[object Number]';
+  };
+
+  // Is the given value `NaN`?
+  _.isNaN = function(obj) {
+    // `NaN` is the only value for which `===` is not reflexive.
+    return obj !== obj;
+  };
+
+  // Is a given value a boolean?
+  _.isBoolean = function(obj) {
+    return obj === true || obj === false || toString.call(obj) == '[object Boolean]';
+  };
+
+  // Is a given value a date?
+  _.isDate = function(obj) {
+    return toString.call(obj) == '[object Date]';
+  };
+
+  // Is the given value a regular expression?
+  _.isRegExp = function(obj) {
+    return toString.call(obj) == '[object RegExp]';
+  };
+
+  // Is a given value equal to null?
+  _.isNull = function(obj) {
+    return obj === null;
+  };
+
+  // Is a given variable undefined?
+  _.isUndefined = function(obj) {
+    return obj === void 0;
+  };
+
+  // Utility Functions
+  // -----------------
+
+  // Run Underscore.js in *noConflict* mode, returning the `_` variable to its
+  // previous owner. Returns a reference to the Underscore object.
+  _.noConflict = function() {
+    root._ = previousUnderscore;
+    return this;
+  };
+
+  // Keep the identity function around for default iterators.
+  _.identity = function(value) {
+    return value;
+  };
+
+  // Run a function **n** times.
+  _.times = function (n, iterator, context) {
+    for (var i = 0; i < n; i++) iterator.call(context, i);
+  };
+
+  // Escape a string for HTML interpolation.
+  _.escape = function(string) {
+    return (''+string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;').replace(/\//g,'&#x2F;');
+  };
+
+  // Add your own custom functions to the Underscore object, ensuring that
+  // they're correctly added to the OOP wrapper as well.
+  _.mixin = function(obj) {
+    each(_.functions(obj), function(name){
+      addToWrapper(name, _[name] = obj[name]);
+    });
+  };
+
+  // Generate a unique integer id (unique within the entire client session).
+  // Useful for temporary DOM ids.
+  var idCounter = 0;
+  _.uniqueId = function(prefix) {
+    var id = idCounter++;
+    return prefix ? prefix + id : id;
+  };
+
+  // By default, Underscore uses ERB-style template delimiters, change the
+  // following template settings to use alternative delimiters.
+  _.templateSettings = {
+    evaluate    : /<%([\s\S]+?)%>/g,
+    interpolate : /<%=([\s\S]+?)%>/g,
+    escape      : /<%-([\s\S]+?)%>/g
+  };
+
+  // JavaScript micro-templating, similar to John Resig's implementation.
+  // Underscore templating handles arbitrary delimiters, preserves whitespace,
+  // and correctly escapes quotes within interpolated code.
+  _.template = function(str, data) {
+    var c  = _.templateSettings;
+    var tmpl = 'var __p=[],print=function(){__p.push.apply(__p,arguments);};' +
+      'with(obj||{}){__p.push(\'' +
+      str.replace(/\\/g, '\\\\')
+         .replace(/'/g, "\\'")
+         .replace(c.escape, function(match, code) {
+           return "',_.escape(" + code.replace(/\\'/g, "'") + "),'";
+         })
+         .replace(c.interpolate, function(match, code) {
+           return "'," + code.replace(/\\'/g, "'") + ",'";
+         })
+         .replace(c.evaluate || null, function(match, code) {
+           return "');" + code.replace(/\\'/g, "'")
+                              .replace(/[\r\n\t]/g, ' ') + ";__p.push('";
+         })
+         .replace(/\r/g, '\\r')
+         .replace(/\n/g, '\\n')
+         .replace(/\t/g, '\\t')
+         + "');}return __p.join('');";
+    var func = new Function('obj', '_', tmpl);
+    if (data) return func(data, _);
+    return function(data) {
+      return func.call(this, data, _);
+    };
+  };
+
+  // The OOP Wrapper
+  // ---------------
+
+  // If Underscore is called as a function, it returns a wrapped object that
+  // can be used OO-style. This wrapper holds altered versions of all the
+  // underscore functions. Wrapped objects may be chained.
+  var wrapper = function(obj) { this._wrapped = obj; };
+
+  // Expose `wrapper.prototype` as `_.prototype`
+  _.prototype = wrapper.prototype;
+
+  // Helper function to continue chaining intermediate results.
+  var result = function(obj, chain) {
+    return chain ? _(obj).chain() : obj;
+  };
+
+  // A method to easily add functions to the OOP wrapper.
+  var addToWrapper = function(name, func) {
+    wrapper.prototype[name] = function() {
+      var args = slice.call(arguments);
+      unshift.call(args, this._wrapped);
+      return result(func.apply(_, args), this._chain);
+    };
+  };
+
+  // Add all of the Underscore functions to the wrapper object.
+  _.mixin(_);
+
+  // Add all mutator Array functions to the wrapper.
+  each(['pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift'], function(name) {
+    var method = ArrayProto[name];
+    wrapper.prototype[name] = function() {
+      method.apply(this._wrapped, arguments);
+      return result(this._wrapped, this._chain);
+    };
+  });
+
+  // Add all accessor Array functions to the wrapper.
+  each(['concat', 'join', 'slice'], function(name) {
+    var method = ArrayProto[name];
+    wrapper.prototype[name] = function() {
+      return result(method.apply(this._wrapped, arguments), this._chain);
+    };
+  });
+
+  // Start chaining a wrapped Underscore object.
+  wrapper.prototype.chain = function() {
+    this._chain = true;
+    return this;
+  };
+
+  // Extracts the result from a wrapped and chained object.
+  wrapper.prototype.value = function() {
+    return this._wrapped;
+  };
+
+}).call(this);
 /**
  * Zen Coding settings
  * @author Sergey Chikuyonok (serge.che@gmail.com)
@@ -738,22 +1719,21 @@ var zen_settings = {
  * ('system' and 'user') for fast and safe resurce update
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */var zen_resources = (function(){
-	var TYPE_ABBREVIATION = 'zen-tag',
-		TYPE_EXPANDO = 'zen-expando',
-	
-		/** Reference to another abbreviation or tag */
-		TYPE_REFERENCE = 'zen-reference',
-		
-		VOC_SYSTEM = 'system',
+ * 
+ * @memberOf __zenCodingResource
+ */
+var zen_resources = (/** @constructor */ function(){
+	var VOC_SYSTEM = 'system',
 		VOC_USER = 'user',
 		
 		/** Regular expression for XML tag matching */
 		re_tag = /^<(\w+\:?[\w\-]*)((?:\s+[\w\:\-]+\s*=\s*(['"]).*?\3)*)\s*(\/?)>/,
-		re_attrs = /([\w\-]+)\s*=\s*(['"])(.*?)\2/g,
 		
 		system_settings = {},
 		user_settings = {};
+	
+	/** List of registered abbreviation resolvers */
+	var resolvers = [];
 		
 	/**
 	 * Trim whitespace from string
@@ -872,18 +1852,24 @@ var zen_settings = {
 	 * @return {Object|null}
 	 */
 	function getParsedItem(vocabulary, syntax, name, item) {
-		var chain = createResourceChain(vocabulary, syntax, name),
-			result = null,
-			res;
-			
+		var chain = createResourceChain(vocabulary, syntax, name);
+		var result = null, res;
+		
 		for (var i = 0, il = chain.length; i < il; i++) {
 			res = chain[i];
 			if (item in res) {
-				if (name == 'abbreviations' && !isParsed(res[item])) {
-					// parse abbreviation
-					var value = res[item];
-					res[item] = parseAbbreviation(item, value);
-					res[item].__ref = value;
+				if (!isParsed(res[item])) {
+					switch(name) {
+						case 'abbreviations':
+							var value = res[item];
+							res[item] = parseAbbreviation(item, value);
+							res[item].__ref = value;
+							break;
+						case 'snippets':
+							res[item] = zen_coding.dataType.snippet(res[item]);
+							break;
+					}
+					
 					setParsed(res[item]);
 				}
 				
@@ -898,9 +1884,9 @@ var zen_settings = {
 	/**
 	 * Unified object for parsed data
 	 */
-	function entry(type, key, value) {
+	function entry(key, value) {
 		return {
-			type: type,
+			type: value.type,
 			key: key,
 			value: value
 		};
@@ -913,7 +1899,7 @@ var zen_settings = {
 	 * @return {Object}
 	 */
 	function makeExpando(key, value) {
-		return entry(TYPE_EXPANDO, key, value);
+		return entry(key, zen_coding.dataType.expando(value));
 	}
 	
 	/**
@@ -925,29 +1911,13 @@ var zen_settings = {
 	 * @return {Object}
 	 */
 	function makeAbbreviation(key, tag_name, attrs, is_empty) {
-		var result = {
-			name: tag_name,
-			is_empty: !!is_empty
-		};
-		
-		if (attrs) {
-			var m;
-			result.attributes = [];
-			while (m = re_attrs.exec(attrs)) {
-				result.attributes.push({
-					name: m[1],
-					value: m[3]
-				});
-			}
-		}
-		
-		return entry(TYPE_ABBREVIATION, key, result);
+		return entry(key, zen_coding.dataType.element(tag_name, attrs, is_empty));
 	}
 	
 	/**
 	 * Parses single abbreviation
 	 * @param {String} key Abbreviation name
-	 * @param {String} value = Abbreviation value
+	 * @param {String} value Abbreviation value
 	 * @return {Object}
 	 */
 	function parseAbbreviation(key, value) {
@@ -960,7 +1930,7 @@ var zen_settings = {
 			return makeAbbreviation(key, m[1], m[2], m[4] == '/');
 		} else {
 			// assume it's reference to another abbreviation
-			return entry(TYPE_REFERENCE, key, value);
+			return entry(key, zen_coding.dataType.reference(value));
 		}
 	}
 	
@@ -969,6 +1939,7 @@ var zen_settings = {
 		 * Sets new unparsed data for specified settings vocabulary
 		 * @param {Object} data
 		 * @param {String} type Vocabulary type ('system' or 'user')
+		 * @memberOf zen_resources
 		 */
 		setVocabulary: function(data, type) {
 			if (type == VOC_SYSTEM)
@@ -1016,6 +1987,25 @@ var zen_settings = {
 		getSnippet: function(type, name) {
 			return this.getResource(type, 'snippets', name)
 				|| this.getResource(type, 'snippets', name.replace(/\-/g, ':'));
+		},
+		
+		/**
+		 * Returns resource (abbreviation, snippet, etc.) matched for passed 
+		 * abbreviation
+		 * @param {String} syntax
+		 * @param {String} abbr
+		 * @returns {Object}
+		 */
+		getMatchedResource: function(syntax, abbr) {
+			// walk through registered resolvers
+			var result = null;
+			for (var i = 0, il = resolvers.length; i < il; i++) {
+				result = resolvers[i](abbr, syntax);
+				if (result !== null)
+					return result;
+			}
+			
+			return this.getAbbreviation(syntax, abbr) || this.getSnippet(syntax, abbr);
 		},
 		
 		/**
@@ -1067,7 +2057,7 @@ var zen_settings = {
 						
 					setParsed(res);
 				}
-				return res[type] || {}
+				return res[type] || {};
 			}
 			else
 				return {};
@@ -1081,8 +2071,24 @@ var zen_settings = {
 		hasSyntax: function(syntax) {
 			return syntax in getVocabulary(VOC_USER) 
 				|| syntax in getVocabulary(VOC_SYSTEM);
+		},
+		
+		/**
+		 * Registers new abbreviation resolver.
+		 * @param {Function} fn Abbreviation resolver which will receive 
+		 * abbreviation as first argument and should return parsed abbreviation
+		 * object if abbreviation has handled successfully, <code>null</code>
+		 * otherwise
+		 */
+		addResolver: function(fn) {
+			if (!_.include(resolvers, fn))
+				resolvers.unshift(fn);
+		},
+		
+		removeResolver: function(fn) {
+			resolvers = _.without(resolvers, fn);
 		}
-	}
+	};
 })();
 
 try {
@@ -1093,9 +2099,11 @@ try {
  * and text nodes
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * 
+ * @memberOf __zen_parser
+ * @constructor
  * @include "zen_coding.js"
- */var zen_parser = (function(){
+ */
+var zen_parser = (function(){
 	
 	var re_valid_name = /^[\w\d\-_\$\:@!]+\+?$/i;
 	
@@ -1507,6 +2515,7 @@ try {
 		 * text nodes and attributes. Each node of the tree is a single 
 		 * abbreviation. Tree represents actual structure of the outputted 
 		 * result
+		 * @memberOf zen_parser
 		 * @param {String} abbr Abbreviation to parse
 		 * @return {TreeNode}
 		 */
@@ -1631,15 +2640,14 @@ try {
 		
 		TreeNode: TreeNode,
 		optimizeTree: optimizeTree
-	}
+	};
 })();/**
  * Core library that do all Zen Coding magic
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * @include "settings.js"
- * @include "zen_parser.js"
- * @include "zen_resources.js"
- */var zen_coding = (function(){
+ * @memberOf __zenCoding
+ */
+var zen_coding = (/** @constructor */ function(){
 	var re_tag = /<\/?[\w:\-]+(?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*\s*(\/?)>$/,
 	
 		caret_placeholder = '{%::zen-caret::%}',
@@ -1713,7 +2721,7 @@ try {
 	function getCaretPlaceholder() {
 		return (typeof(caret_placeholder) != 'string') 
 			? caret_placeholder()
-			: caret_placeholder
+			: caret_placeholder;
 	}
 	
 	/**
@@ -1841,7 +2849,8 @@ try {
 	/**
 	 * Replace variables like ${var} in string
 	 * @param {String} str
-	 * @param {Object|Function} [vars] Variable set (default is <code>zen_settings.variables</code>) 
+	 * @param {Object} vars Variable set (default is <code>zen_settings.variables</code>)
+	 * or variable resolver 
 	 * @return {String}
 	 */
 	function replaceVariables(str, vars) {
@@ -1857,7 +2866,7 @@ try {
 			callback = function(str, p1) {
 				var v = getVariable(p1);
 				return (v !== null && typeof v != 'undefined') ? v : str;
-			}
+			};
 		
 		return str.replace(/\$\{([\w\-]+)\}/g, callback);
 	}
@@ -1902,8 +2911,9 @@ try {
 		var abbr = null;
 		if (node.name) {
 			abbr = getAbbreviation(type, filterNodeName(node.name));
-			if (abbr && abbr.type == 'zen-reference')
-				abbr = getAbbreviation(type, filterNodeName(abbr.value));
+			if (abbr && abbr.type == zen_coding.dataType.REFERENCE) {
+				abbr = getAbbreviation(type, filterNodeName(abbr.value.data));
+			}
 		}
 		
 		this.name = (abbr) ? abbr.value.name : node.name;
@@ -1967,7 +2977,7 @@ try {
 				}
 			} else {
 				a = {name: name, value: value};
-				this._attr_hash[name] = a
+				this._attr_hash[name] = a;
 				this.attributes.push(a);
 			}
 		},
@@ -2047,7 +3057,7 @@ try {
 	 * @param {zen_parser.TreeNode} node
 	 * @param {String} type Tag type (html, xml)
 	 */
-	function Snippet(node, type) {
+	function Snippet(node, type, source) {
 		/** @type {String} */
 		this.name = filterNodeName(node.name);
 		this.real_name = node.name;
@@ -2057,7 +3067,7 @@ try {
 		this.repeat_by_lines = node.is_repeating;
 		this.is_repeating = node && node.count > 1;
 		this.attributes = [];
-		this.value = replaceUnescapedSymbol(getSnippet(type, this.name), '|', getCaretPlaceholder());
+		this.value = replaceUnescapedSymbol(source ? source.data : getSnippet(type, this.name), '|', getCaretPlaceholder());
 		this.parent = null;
 		this.syntax = type;
 		
@@ -2085,7 +3095,8 @@ try {
 	 * @return {Object|null}
 	 */
 	function getSnippet(type, snippet_name) {
-		return zen_resources.getSnippet(type, snippet_name);
+		var result = zen_resources.getSnippet(type, snippet_name);
+		return result ? result.data : '';
 	}
 	
 	/**
@@ -2106,6 +3117,7 @@ try {
 	
 	/**
 	 * @class
+	 * @type ZenNode
 	 * Creates simplified tag from Zen Coding tag
 	 * @param {Tag} tag
 	 */
@@ -2172,18 +3184,39 @@ try {
 		},
 		
 		/**
+		 * Returns attribute object
+		 * @private
+		 * @param {String} name Attribute name
+		 */
+		_getAttr: function(name) {
+			name = name.toLowerCase();
+			for (var i = 0, il = this.attributes.length; i < il; i++) {
+				if (this.attributes[i].name.toLowerCase() == name)
+					return this.attributes[i];
+			}
+			
+			return null;
+		},
+		
+		/**
 		 * Get attribute's value.
 		 * @param {String} name
 		 * @return {String|null} Returns <code>null</code> if attribute wasn't found
 		 */
 		getAttribute: function(name) {
-			name = name.toLowerCase();
-			for (var i = 0, il = this.attributes.length; i < il; i++) {
-				if (this.attributes[i].name.toLowerCase() == name)
-					return this.attributes[i].value;
-			}
-			
-			return null;
+			var attr = this._getAttr(name);
+			return attr && attr.value;
+		},
+		
+		/**
+		 * Set attribute's value.
+		 * @param {String} name
+		 * @param {String} value
+		 */
+		setAttribute: function(name, value) {
+			var attr = this._getAttr(name);
+			if (attr)
+				attr.value = value;
 		},
 		
 		/**
@@ -2441,9 +3474,10 @@ try {
 		type = type || 'html';
 		if (node.isEmpty()) return null;
 		
-		return isShippet(node.name, type) 
-				? new Snippet(node, type)
-				: new Tag(node, type);
+		var res = zen_resources.getMatchedResource(type, filterNodeName(node.name));
+		return res && res.type === zen_coding.dataType.SNIPPET
+				? new Snippet(node, type, res)
+				: new Tag(node, type, res);
 	}
 	
 	/**
@@ -2483,7 +3517,7 @@ try {
 				// it's expando
 				var a = getAbbreviation(type, n.name);
 				if (a)
-					node.children[i] = zen_parser.parse(a.value);
+					node.children[i] = zen_parser.parse(a.value.data);
 			}
 			replaceExpandos(node.children[i], type);
 		}
@@ -2593,6 +3627,7 @@ try {
 		 * @param {String} name Action's name
 		 * @param {Function} fn Action itself. The first argument should be
 		 * <code>zen_editor</code> instance.
+		 * @memberOf zen_coding
 		 */
 		registerAction: function(name, fn) {
 			this.actions[name.toLowerCase()] = fn;
@@ -2623,9 +3658,9 @@ try {
 //			}
 		},
 		
-		expandAbbreviation: function(abbr, type, profile) {
+		expandAbbreviation: function(abbr, type, profile, contextNode) {
 			type = type || 'html';
-			var parsed_tree = this.parseIntoTree(abbr, type);
+			var parsed_tree = this.parseIntoTree(abbr, type, contextNode);
 			
 			if (parsed_tree) {
 				var tree = rolloutTree(parsed_tree);
@@ -2705,9 +3740,11 @@ try {
 		 * Parses abbreviation into a node set
 		 * @param {String} abbr Abbreviation
 		 * @param {String} type Document type (xsl, html, etc.)
+		 * @param {TreeNode} contextNode Contextual node (XHTML under current 
+		 * caret position), for better abbreviation expansion
 		 * @return {Tag}
 		 */
-		parseIntoTree: function(abbr, type) {
+		parseIntoTree: function(abbr, type, contextNode) {
 			type = type || 'html';
 			// remove filters from abbreviation
 			var filter_list = '';
@@ -2719,7 +3756,7 @@ try {
 			// try to parse abbreviation
 			try {
 				var abbr_tree = zen_parser.parse(abbr),
-					tree_root = new Tag({}, type);
+					tree_root = new Tag(contextNode || {}, type);
 					
 				abbr_tree = preprocessParsedTree(abbr_tree, type);
 			} catch(e) {
@@ -3125,8 +4162,10 @@ try {
 			}
 			
 			return str_builder.join('');
-		}
-	}
+		},
+		
+		trim: trim
+	};
 })();/**
  * Middleware layer that communicates between editor and Zen Coding.
  * This layer describes all available Zen Coding actions, like 
@@ -3176,8 +4215,9 @@ function expandAbbreviation(editor, syntax, profile_name) {
 		content = '';
 		
 	if ( (abbr = findAbbreviation(editor)) ) {
-		content = zen_coding.expandAbbreviation(abbr, syntax, profile_name);
+		content = zen_coding.expandAbbreviation(abbr, syntax, profile_name, captureContext(editor));
 		if (content) {
+			editor.print('Expanding ' + content);
 			editor.replaceContent(content, caret_pos - abbr.length, caret_pos);
 			return true;
 		}
@@ -4135,6 +5175,45 @@ function evaluateMathExpression(editor) {
 	return false;
 }
 
+/**
+ * Captures context XHTML element from editor under current caret position.
+ * This node can be used as a helper for abbreviation extraction
+ * @param {IZenEditor} editor
+ * @returns {TreeNode}
+ */
+function captureContext(editor) {
+	var allowedSyntaxes = {'html': 1, 'xml': 1, 'xsl': 1};
+	var syntax = String(editor.getSyntax());
+	if (syntax in allowedSyntaxes) {
+		var tags = zen_coding.html_matcher.getTags(
+				String(editor.getContent()), 
+				editor.getCaretPos(), 
+				String(editor.getProfileName()));
+		
+		if (tags && tags[0] && tags[0].type == 'tag') {
+			var reAttr = /([\w\-:]+)(?:\s*=\s*(?:(?:"((?:\\.|[^"])*)")|(?:'((?:\\.|[^'])*)')|([^>\s]+)))?/g;
+			var startTag = tags[0];
+			var tagAttrs = startTag.full_tag.replace(/^<[\w\-\:]+/, '');
+			/** @type TreeNode */
+			var contextNode = new zen_parser.TreeNode();
+			contextNode.name = startTag.name;
+			
+			// parse attributes
+			var m;
+			while (m = reAttr.exec(tagAttrs)) {
+				contextNode.attributes.push({
+					name: m[1],
+					value: m[2]
+				});
+			}
+			
+			return contextNode;
+		}
+	}
+	
+	return null;
+}
+
 // register all actions
 zen_coding.registerAction('expand_abbreviation', expandAbbreviation);
 zen_coding.registerAction('expand_abbreviation_with_tab', expandAbbreviationWithTab);
@@ -4186,9 +5265,139 @@ zen_coding.registerAction('decrement_number_by_01', function(editor) {
 
 zen_coding.registerAction('evaluate_math_expression', evaluateMathExpression);
 /**
+ * Factories for default Zen Coding element types: abbreviation, snippet, 
+ * reference
+ * @memberOf __zenCodingDataType
+ * @constructor
+ */
+(function() {
+	var reAttrs = /([\w\-]+)\s*=\s*(['"])(.*?)\2/g;
+	
+	_.extend(zen_coding, {
+		/**
+		 * It's a garbage, just for JSDT code completion
+		 * @memberOf zen_coding
+		 */
+		__id: 1,
+		dataType: {
+			/** @memberOf zen_coding.dataType */
+			ELEMENT: 1,
+			SNIPPET: 2,
+			REFERENCE: 3,
+			EXPANDO: 4,
+			
+			/**
+			 * Element factory
+			 * @param {String} elementName Name of output element
+			 * @param {String} attrs Attributes definition. You may also pass
+			 * <code>Array</code> where each contains object with <code>name</code> 
+			 * and <code>value</code> properties, or <code>Object</code>
+			 * @param {Boolean} isEmpty Is expanded element should be empty
+			 */
+			element: function(elementName, attrs, isEmpty) {
+				var result = {
+					type: this.ELEMENT,
+					name: elementName,
+					is_empty: !!isEmpty
+				};
+				
+				if (attrs) {
+					result.attributes = [];
+					if (_.isArray(attrs)) {
+						result.attributes = attrs;
+					} else if (_.isString(attrs)) {
+						var m;
+						while (m = reAttrs.exec(attrs)) {
+							result.attributes.push({
+								name: m[1],
+								value: m[3]
+							});
+						}
+					} else {
+						_.each(attrs, function(value, name) {
+							result.attributes.push({
+								name: name, 
+								value: value
+							});
+						});
+					}
+				}
+				
+				return result;
+			},
+			
+			/**
+			 * Snippet factory
+			 * @param {String} value Snippet value
+			 */
+			snippet: function(value) {
+				return  {
+					type: this.SNIPPET,
+					data: value
+				};
+			},
+			
+			/**
+			 * Expando (string containing abbreviation) factory
+			 * @param {String} value
+			 */
+			expando: function(value) {
+				return {
+					type: this.EXPANDO,
+					data: value
+				};
+			},
+			
+			/**
+			 * Reference to another item (element or snippet) factory
+			 * @param {String} value
+			 */
+			reference: function(value) {
+				return  {
+					type: this.REFERENCE,
+					data: value
+				};
+			}
+		}
+	});
+}());/**
+ * Module adds support for generators: a regexp-based abbreviation resolver 
+ * that can produce custom output.
+ */
+(function() {
+	var generators = [];
+	
+	_.extend(zen_coding, {
+		addGenerator: function(regexp, fn) {
+			if (_.isString(regexp))
+				regexp = new RegExp(regexp);
+			
+			generators.unshift({
+				re: regexp,
+				fn: fn
+			});
+		}
+	});
+	
+	zen_resources.addResolver(function(abbr, syntax) {
+		var result = null;
+		for (var i = 0, il = generators.length; i < il; i++) {
+			var item = generators[i], m;
+			if ((m = item.re.exec(abbr))) {
+				result = item.fn(m, abbr, syntax);
+				if (result !== null) {
+					return _.isString(result) ? zen_coding.dataType.snippet(result) : result;
+				}
+			}
+		}
+		
+		return result;
+	});
+}());/**
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	// Regular Expressions for parsing tags and attributes
 	var start_tag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/,
 		end_tag = /^<\/([\w\:\-]+)[^>]*>/,
@@ -4346,7 +5555,7 @@ zen_coding.registerAction('evaluate_math_expression', evaluateMathExpression);
 			
 		forward_stack.last = backward_stack.last = function() {
 			return this[this.length - 1];
-		}
+		};
 		
 		function hasMatch(str, start) {
 			if (arguments.length == 1)
@@ -4447,7 +5656,7 @@ zen_coding.registerAction('evaluate_math_expression', evaluateMathExpression);
 	 */
 	var HTMLPairMatcher = function(/* String */ html, /* Number */ start_ix, /*  */ mode){
 		return findPair(html, start_ix, mode, saveMatch);
-	}
+	};
 	
 	HTMLPairMatcher.start_tag = start_tag;
 	HTMLPairMatcher.end_tag = end_tag;
@@ -5547,7 +6756,8 @@ var CSSEX = (function () {
  * @link http://chikuyonok.ru
  * 
  * @include "sex.js"
- */var ParserUtils = (function() {
+ */
+var ParserUtils = (function() {
 	var css_stop_chars = '{}/\\<>';
 	
 	function isStopChar(token) {
@@ -6759,10 +7969,297 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
 			return findPrevHTMLItem(editor);
 	});
 })();/**
+ * @memberOf __zen_filter_bem
+ * @constructor
+ */
+zen_coding.registerFilter('bem', (function() {
+	var separators = {
+		element: '__',
+		modifier: '_'
+	};
+	
+	var toString = Object.prototype.toString;
+	var isArray = Array.isArray || function(obj) {
+		return toString.call(obj) == '[object Array]';
+	};
+	
+	var shouldRunHtmlFilter = false;
+	
+	/**
+	 * @param {ZenNode} item
+	 */
+	function bemParse(item) {
+		if (item.type != 'tag')
+			return item;
+		
+		// save BEM stuff in cache for faster lookups
+		item.__bem = {
+			block: '',
+			element: '',
+			modifier: ''
+		};
+		
+		var classNames = normalizeClassName(item.getAttribute('class')).split(' ');
+		
+		// process class names
+		var processedClassNames = [];
+		var i, il, _item;
+		for (i = 0, il = classNames.length; i < il; i++) {
+			processedClassNames.push(processClassName(classNames[i], item));
+		}
+		
+		// flatten array
+		var allClassNames = [];
+		for (i = 0, il = processedClassNames.length; i < il; i++) {
+			_item = processedClassNames[i];
+			if (isArray(_item)) {
+				for (var j = 0, jl = _item.length; j < jl; j++) {
+					allClassNames.push(_item[j]);
+				}
+			} else {
+				allClassNames.push(_item);
+			}
+		}
+		
+		// remove duplicates
+		var memo = [];
+		for (i = 0, il = allClassNames.length; i < il; i++) {
+			_item = allClassNames[i];
+			if (!arrayInclude(memo, _item))
+				memo.push(_item);
+		}
+		
+		allClassNames = memo;
+		item.setAttribute('class', allClassNames.join(' '));
+		
+		if (!item.__bem.block) {
+			// guess best match for block name
+			var reBlockName = /^[a-z]\-/i;
+			for (i = 0, il = allClassNames.length; i < il; i++) {
+				/** @type String */
+				if (reBlockName.test(allClassNames[i])) {
+					item.__bem.block = allClassNames[i];
+					break;
+				}
+			}
+			
+			// guessing doesn't worked, pick first class name as block name
+			if (!item.__bem.block) {
+				item.__bem.block = allClassNames[0];
+			}
+			
+		}
+		
+		return item;
+	
+	}
+	
+	/**
+	 * @param {String} className
+	 * @returns {String}
+	 */
+	function normalizeClassName(className) {
+		className = ' ' + (className || '') + ' ';
+		className = className.replace(/\s+/g, ' ').replace(/\s(\-+)/g, function(str, p1) {
+			return ' ' + zen_coding.repeatString(separators.element, p1.length);
+		});
+		
+		return zen_coding.trim(className);
+	}
+	
+	/**
+	 * Processes class name
+	 * @param {String} name Class name item to process
+	 * @param {ZenNode} item Host node for provided class name
+	 * @returns {String} Processed class name. May return <code>Array</code> of
+	 * class names 
+	 */
+	function processClassName(name, item) {
+		name = transformClassName(name, item, 'element');
+		name = transformClassName(name, item, 'modifier');
+		
+		// expand class name
+		// possible values:
+		// * block__element
+		// * block__element_modifier
+		// * block__element_modifier1_modifier2
+		// * block_modifier
+		var result, block = '', element = '', modifier = '';
+		if (~name.indexOf(separators.element)) {
+			var blockElem = name.split(separators.element);
+			var elemModifiers = blockElem[1].split(separators.modifier);
+			
+			block = blockElem[0];
+			element = elemModifiers.shift();
+			modifier = elemModifiers.join(separators.modifier);
+		} else if (~name.indexOf(separators.modifier)) {
+			var blockModifiers = name.split(separators.modifier);
+			
+			block = blockModifiers.shift();
+			modifier = blockModifiers.join(separators.modifier);
+		}
+		
+		if (block) {
+			// inherit parent bem element, if exists
+//			if (item.parent && item.parent.__bem && item.parent.__bem.element)
+//				element = item.parent.__bem.element + separators.element + element;
+			
+			// produce multiple classes
+			var prefix = block;
+			var result = [];
+			
+			if (element) {
+				prefix += separators.element + element;
+				result.push(prefix);
+			} else {
+				result.push(prefix);
+			}
+			
+			if (modifier) {
+				result.push(prefix + separators.modifier + modifier);
+			}
+			
+			
+			item.__bem.block = block;
+			item.__bem.element = element;
+			item.__bem.modifier = modifier;
+			
+			return result;
+		}
+		
+		// ...otherwise, return processed or original class name
+		return name;
+	}
+	
+	/**
+	 * Low-level function to transform user-typed class name into full BEM class
+	 * @param {String} name Class name item to process
+	 * @param {ZenNode} item Host node for provided class name
+	 * @param {String} entityType Type of entity to be tried to transform 
+	 * ('element' or 'modifier')
+	 * @returns {String} Processed class name or original one if it can't be
+	 * transformed
+	 */
+	function transformClassName(name, item, entityType) {
+		var reSep = new RegExp('^(' + separators[entityType] + ')+', 'g');
+		if (reSep.test(name)) {
+			var depth = 0; // parent lookup depth
+			var cleanName = name.replace(reSep, function(str, p1) {
+				depth = str.length / separators[entityType].length;
+				return '';
+			});
+			
+			// find donor element
+			var donor = item;
+			while (donor.parent && depth--) {
+				donor = donor.parent;
+			}
+			
+			if (!donor || !donor.__bem)
+				donor = item;
+			
+			if (donor && donor.__bem) {
+				var prefix = donor.__bem.block;
+				
+				// decide if we should inherit element name
+//				if (entityType == 'element') {
+//					var curElem = cleanName.split(separators.modifier, 1)[0];
+//					if (donor.__bem.element && donor.__bem.element != curElem)
+//						prefix += separators.element + donor.__bem.element;
+//				}
+				
+				if (entityType == 'modifier' &&  donor.__bem.element)
+					prefix += separators.element + donor.__bem.element;
+				
+				return prefix + separators[entityType] + cleanName;
+			}
+		}
+		
+		return name;
+	}
+	
+	/**
+	 * Utility function, checks if <code>arr</code> contains <code>value</code>
+	 * @param {Array} arr
+	 * @param {Object} value
+	 * @returns {Boolean}
+	 */
+	function arrayInclude(arr, value) {
+		var result = -1;
+		if (arr.indexOf) {
+			result = arr.indexOf(value);
+		} else {
+			for (var i = 0, il = arr.length; i < il; i++) {
+				if (arr[i] === value) {
+					result = i;
+					break;
+				}
+			}
+		}
+		
+		return result != -1;
+	}
+	
+	/**
+	 * Recursive function for processing tags, which extends class names 
+	 * according to BEM specs: http://bem.github.com/bem-method/pages/beginning/beginning.ru.html
+	 * <br><br>
+	 * It does several things:<br>
+	 * <ul>
+	 * <li>Expands complex class name (according to BEM symbol semantics):
+	 * .block__elem_modifier → .block.block__elem.block__elem_modifier
+	 * </li>
+	 * <li>Inherits block name on child elements: 
+	 * .b-block > .__el > .__el → .b-block > .b-block__el > .b-block__el__el
+	 * </li>
+	 * <li>Treats typographic '—' symbol as '__'</li>
+	 * <li>Double underscore (or typographic '–') is also treated as an element 
+	 * level lookup, e.g. ____el will search for element definition in parent’s 
+	 * parent element:
+	 * .b-block > .__el1 > .____el2 → .b-block > .b-block__el1 > .b-block__el2
+	 * </li>
+	 * </ul>
+	 * 
+	 * @param {ZenNode} tree
+	 * @param {Object} profile
+	 * @param {Number} [level] Depth level
+	 */
+	function process(tree, profile, level) {
+		if (tree.name)
+			bemParse(tree);
+		
+		for (var i = 0, il = tree.children.length; i < il; i++) {
+			var item = tree.children[i];
+			process(bemParse(item), profile);
+			if (item.type == 'tag' && item.start)
+				shouldRunHtmlFilter = true;
+		}
+		
+		return tree;
+	};
+	
+	/**
+	 * @param {ZenNode} tree
+	 * @param {Object} profile
+	 * @param {Number} [level] Depth level
+	 */
+	return function(tree, profile, level) {
+		shouldRunHtmlFilter = false;
+		tree = process(tree, profile, level);
+		// in case 'bem' filter is applied after 'html' filter: run it again
+		// to update output
+		if (shouldRunHtmlFilter) {
+			tree = zen_coding.runFilters(tree, profile, 'html');
+		}
+		
+		return tree;
+	};
+})());/**
  * Comment important tags (with 'id' and 'class' attributes)
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	/**
 	 * Add comments to tag
 	 * @param {ZenNode} node
@@ -6811,7 +8308,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
  * <em>!important</em> suffix 
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	var re_important = /(.+)\!$/;
 	function process(tree, profile) {
 		for (var i = 0, il = tree.children.length; i < il; i++) {
@@ -6834,7 +8332,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
  * Filter for escaping unsafe XML characters: <, >, &
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	var char_map = {
 		'<': '&lt;',
 		'>': '&gt;',
@@ -6867,7 +8366,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
  * padding:0; → padding: 0;
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	function process(tree, profile) {
 		for (var i = 0, il = tree.children.length; i < il; i++) {
 			/** @type {ZenNode} */
@@ -6895,7 +8395,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
  * @link http://chikuyonok.ru
  * 
  * @include "../zen_coding.js"
- */(function(){
+ */
+(function(){
 	var child_token = '${child}',
 		placeholder = '%s';
 	
@@ -7321,13 +8822,26 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
 		item.start = item.start.replace('%s', zen_coding.padString(start, padding));
 		item.end = item.end.replace('%s', zen_coding.padString(end, padding));
 		
+		var startPlaceholderNum = 100;
+		var placeholderMemo = {};
+		
 		// replace variables ID and CLASS
-		var cb = function(str, var_name) {
-			if (var_name == 'id' || var_name == 'class')
-				return item.getAttribute(var_name);
-			else
-				return str;
+		var cb = function(str, varName) {
+			var attr = item.getAttribute(varName);
+			if (attr !== null)
+				return attr;
+			
+			var varValue = zen_coding.getVariable(varName);
+			if (varValue)
+				return varValue;
+			
+			// output as placeholder
+			if (!placeholderMemo[varName])
+				placeholderMemo[varName] = startPlaceholderNum++;
+				
+			return '${' + placeholderMemo[varName] + ':' + varName + '}';
 		};
+		
 		item.start = zen_coding.replaceVariables(item.start, cb);
 		item.end = zen_coding.replaceVariables(item.end, cb);
 		
@@ -7461,7 +8975,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
 	}
 	
 	zen_coding.registerFilter('s', process);
-})();/**
+})();
+/**
  * Trim filter: removes characters at the beginning of the text
  *  content that indicates lists: numbers, #, *, -, etc.
  * @author Sergey Chikuyonok (serge.che@gmail.com)
@@ -7483,12 +8998,14 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
 	}
 	
 	zen_coding.registerFilter('t', process);
-})();/**
+})();
+/**
  * Filter for trimming "select" attributes from some tags that contains
  * child elements
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ */
+(function(){
 	var tags = {
 		'xsl:variable': 1,
 		'xsl:with-param': 1
@@ -7526,7 +9043,8 @@ zen_coding.registerAction('update_image_size', updateImageSize);/**
  * @param {ZenEditor} editor
  * @param {String} action_name
  * @return {Boolean}
- */function runZenCodingAction(editor, action_name){
+ */
+function runZenCodingAction(editor, action_name){
 	var args = [editor];
 	for (var i = 2, il = arguments.length; i < il; i++) {
 		args.push(arguments[i]);

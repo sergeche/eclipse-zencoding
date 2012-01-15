@@ -1,9 +1,5 @@
 package ru.zencoding.eclipse;
 
-import java.util.ArrayList;
-
-import ru.zencoding.JSExecutor;
-
 /**
  * Processes Eclipse template and converts it to Zen Coding abbreviation/snippet
  * @author sergey
@@ -16,7 +12,6 @@ public class EclipseTemplateProcessor {
 	 * @return
 	 */
 	public static String process(String template) {
-		ArrayList<String> variables = new ArrayList<String>();
 		StringBuffer result = new StringBuffer();
 		
 		char ch;
@@ -24,7 +19,6 @@ public class EclipseTemplateProcessor {
 		int i = 0;
 		int len = template.length();
 		int varEnd;
-		int varPos;
 		String varName;
 		
 		while (i < len) {
@@ -41,17 +35,10 @@ public class EclipseTemplateProcessor {
 						varName = template.substring(i + 2, varEnd);
 						if (varName.equals("cursor")) {
 							result.append('|');
-						} else if (varName.equals("child") || JSExecutor.getSingleton().hasVariable(varName)) {
-							// ZC has predefined variable of that name, leave as is
-							result.append("${" + varName + "}");
 						} else {
-							varPos = variables.indexOf(varName);
-							if (varPos == -1) {
-								variables.add(varName);
-								varPos = variables.size() - 1;
-							}
-							
-							result.append("${" + varPos + ":" + varName + "}");
+							// Leave variables as is because filters can provide
+							// value substitutions
+							result.append("${" + varName + "}");
 						}
 						i = varEnd;
 					} else {

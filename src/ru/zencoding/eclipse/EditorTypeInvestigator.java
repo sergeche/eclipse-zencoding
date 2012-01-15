@@ -24,6 +24,7 @@ public class EditorTypeInvestigator {
 	public static String PROFILE_XML = "xml";
 	public static String PROFILE_XHTML = "xhtml";
 	public static String PROFILE_HTML = "html";
+	public static String PROFILE_DEFAULT = "default";
 	
 	private EditorTypeInvestigator() {
 		
@@ -70,8 +71,8 @@ public class EditorTypeInvestigator {
 			result = guessSyntaxFromString(className);
 		}
 		
-		if (result == null)
-			result = TYPE_HTML; // fallback to HTML
+//		if (result == null)
+//			result = TYPE_HTML; // fallback to HTML
 		
 		// in case of WTP's XML editor, we have to check editor class too
 		if (result == TYPE_XML && guessSyntaxFromString(className) == TYPE_XSL)
@@ -106,6 +107,6 @@ public class EditorTypeInvestigator {
 			return PROFILE_XML;
 		else
 			// TODO more intelligent output profile guessing
-			return PROFILE_XHTML;
+			return PROFILE_DEFAULT;
 	}
 }
