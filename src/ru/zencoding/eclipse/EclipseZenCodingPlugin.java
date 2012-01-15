@@ -1,8 +1,13 @@
 package ru.zencoding.eclipse;
 
 import org.eclipse.jface.resource.ImageDescriptor;
+import org.eclipse.jface.util.IPropertyChangeListener;
+import org.eclipse.jface.util.PropertyChangeEvent;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 import org.osgi.framework.BundleContext;
+
+import ru.zencoding.JSExecutor;
+import ru.zencoding.eclipse.preferences.PreferenceConstants;
 
 /**
  * The activator class controls the plug-in life cycle
@@ -28,6 +33,16 @@ public class EclipseZenCodingPlugin extends AbstractUIPlugin {
 	public void start(BundleContext context) throws Exception {
 		super.start(context);
 		plugin = this;
+		
+		// XXX maybe there's a better place for such listener?
+		getDefault().getPreferenceStore().addPropertyChangeListener(new IPropertyChangeListener() {
+			@Override
+			public void propertyChange(PropertyChangeEvent event) {
+				if (event.getProperty() == PreferenceConstants.P_EXTENSIONS_PATH) {
+					JSExecutor.reset();
+				}
+			}
+		});
 	}
 
 	/*

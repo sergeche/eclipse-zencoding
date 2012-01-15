@@ -1,8 +1,20 @@
 package ru.zencoding.eclipse.preferences;
 
-import org.eclipse.jface.preference.*;
-import org.eclipse.ui.IWorkbenchPreferencePage;
+import org.eclipse.jface.dialogs.Dialog;
+import org.eclipse.jface.preference.BooleanFieldEditor;
+import org.eclipse.jface.preference.DirectoryFieldEditor;
+import org.eclipse.jface.preference.FieldEditorPreferencePage;
+import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.SelectionAdapter;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.ui.IWorkbench;
+import org.eclipse.ui.IWorkbenchPreferencePage;
+
+import ru.zencoding.JSExecutor;
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 import ru.zencoding.eclipse.TabKeyHandler;
 
@@ -28,6 +40,8 @@ public class EclipseZenCodingPreferencePage
 		super(GRID);
 		setPreferenceStore(EclipseZenCodingPlugin.getDefault().getPreferenceStore());
 		setDescription("Common Zen Coding preferences");
+		
+		
 	}
 	
 	/**
@@ -55,6 +69,12 @@ public class EclipseZenCodingPreferencePage
 			"For CSS editor, you can specify 'close_css_brace' variable \n" +
 			"(see Variable section) with the value that will be automatically \n" +
 			"inserted instead of closing brace of CSS rule defition.", getFieldEditorParent()));
+		
+		addField(new DirectoryFieldEditor(
+			PreferenceConstants.P_EXTENSIONS_PATH,
+			"E&xtensions path",
+			getFieldEditorParent()));
+		
 	}
 
 	/* (non-Javadoc)
@@ -82,5 +102,19 @@ public class EclipseZenCodingPreferencePage
 		super.performDefaults();
 		updatePreferences();
 	}
+	
+	protected void contributeButtons(Composite parent) {
+		Button resetButton = new Button(parent, SWT.PUSH);
+		resetButton.setText("Reload engine");
+		Dialog.applyDialogFont(resetButton);
+		
+		resetButton.addSelectionListener(new SelectionAdapter() {
+			public void widgetSelected(SelectionEvent e) {
+				JSExecutor.reset();
+			}
+		});
+		
+		((GridLayout) parent.getLayout()).numColumns++;
+    }
 	
 }

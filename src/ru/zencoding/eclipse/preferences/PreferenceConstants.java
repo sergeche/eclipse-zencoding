@@ -7,6 +7,7 @@ public class PreferenceConstants {
 
 	public static final String P_TAB_EXPAND = "tabExpand";
 	public static final String P_UPGRADE_EDITORS = "upgradeEditors";
+	public static final String P_EXTENSIONS_PATH = "extensionsPath";
 	
 	public static final String P_FILTERS = "filters";
 	

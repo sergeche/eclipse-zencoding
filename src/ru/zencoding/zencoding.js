@@ -1721,8 +1721,7 @@ var zen_settings = {
  * @link http://chikuyonok.ru
  * 
  * @memberOf __zenCodingResource
- */
-var zen_resources = (/** @constructor */ function(){
+ */var zen_resources = (/** @constructor */ function(){
 	var VOC_SYSTEM = 'system',
 		VOC_USER = 'user',
 		
@@ -2102,8 +2101,7 @@ try {
  * @memberOf __zen_parser
  * @constructor
  * @include "zen_coding.js"
- */
-var zen_parser = (function(){
+ */var zen_parser = (function(){
 	
 	var re_valid_name = /^[\w\d\-_\$\:@!]+\+?$/i;
 	
@@ -2646,8 +2644,7 @@ var zen_parser = (function(){
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
  * @memberOf __zenCoding
- */
-var zen_coding = (/** @constructor */ function(){
+ */var zen_coding = (/** @constructor */ function(){
 	var re_tag = /<\/?[\w:\-]+(?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*\s*(\/?)>$/,
 	
 		caret_placeholder = '{%::zen-caret::%}',
@@ -3929,7 +3926,7 @@ var zen_coding = (/** @constructor */ function(){
 		 */
 		setVariable: function(name, value){
 			var voc = zen_resources.getVocabulary('user') || {};
-			if (!('varaibles' in voc))
+			if (!('variables' in voc))
 				voc.variables = {};
 				
 			voc.variables[name] = value;
@@ -4217,7 +4214,6 @@ function expandAbbreviation(editor, syntax, profile_name) {
 	if ( (abbr = findAbbreviation(editor)) ) {
 		content = zen_coding.expandAbbreviation(abbr, syntax, profile_name, captureContext(editor));
 		if (content) {
-			editor.print('Expanding ' + content);
 			editor.replaceContent(content, caret_pos - abbr.length, caret_pos);
 			return true;
 		}
@@ -5396,8 +5392,7 @@ zen_coding.registerAction('evaluate_math_expression', evaluateMathExpression);
 }());/**
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	// Regular Expressions for parsing tags and attributes
 	var start_tag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/,
 		end_tag = /^<\/([\w\:\-]+)[^>]*>/,
@@ -6756,8 +6751,7 @@ var CSSEX = (function () {
  * @link http://chikuyonok.ru
  * 
  * @include "sex.js"
- */
-var ParserUtils = (function() {
+ */var ParserUtils = (function() {
 	var css_stop_chars = '{}/\\<>';
 	
 	function isStopChar(token) {
@@ -8258,8 +8252,7 @@ zen_coding.registerFilter('bem', (function() {
  * Comment important tags (with 'id' and 'class' attributes)
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	/**
 	 * Add comments to tag
 	 * @param {ZenNode} node
@@ -8308,8 +8301,7 @@ zen_coding.registerFilter('bem', (function() {
  * <em>!important</em> suffix 
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	var re_important = /(.+)\!$/;
 	function process(tree, profile) {
 		for (var i = 0, il = tree.children.length; i < il; i++) {
@@ -8332,8 +8324,7 @@ zen_coding.registerFilter('bem', (function() {
  * Filter for escaping unsafe XML characters: <, >, &
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	var char_map = {
 		'<': '&lt;',
 		'>': '&gt;',
@@ -8366,8 +8357,7 @@ zen_coding.registerFilter('bem', (function() {
  * padding:0; → padding: 0;
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	function process(tree, profile) {
 		for (var i = 0, il = tree.children.length; i < il; i++) {
 			/** @type {ZenNode} */
@@ -8395,8 +8385,7 @@ zen_coding.registerFilter('bem', (function() {
  * @link http://chikuyonok.ru
  * 
  * @include "../zen_coding.js"
- */
-(function(){
+ */(function(){
 	var child_token = '${child}',
 		placeholder = '%s';
 	
@@ -8975,8 +8964,7 @@ zen_coding.registerFilter('bem', (function() {
 	}
 	
 	zen_coding.registerFilter('s', process);
-})();
-/**
+})();/**
  * Trim filter: removes characters at the beginning of the text
  *  content that indicates lists: numbers, #, *, -, etc.
  * @author Sergey Chikuyonok (serge.che@gmail.com)
@@ -8998,14 +8986,12 @@ zen_coding.registerFilter('bem', (function() {
 	}
 	
 	zen_coding.registerFilter('t', process);
-})();
-/**
+})();/**
  * Filter for trimming "select" attributes from some tags that contains
  * child elements
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	var tags = {
 		'xsl:variable': 1,
 		'xsl:with-param': 1
@@ -9043,8 +9029,7 @@ zen_coding.registerFilter('bem', (function() {
  * @param {ZenEditor} editor
  * @param {String} action_name
  * @return {Boolean}
- */
-function runZenCodingAction(editor, action_name){
+ */function runZenCodingAction(editor, action_name){
 	var args = [editor];
 	for (var i = 2, il = arguments.length; i < il; i++) {
 		args.push(arguments[i]);

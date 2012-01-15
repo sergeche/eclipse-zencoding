@@ -1,9 +1,13 @@
 package ru.zencoding;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilenameFilter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 
+import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.text.templates.Template;
 import org.eclipse.jface.text.templates.persistence.TemplateStore;
 import org.mozilla.javascript.Context;
@@ -12,17 +16,18 @@ import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 
 import ru.zencoding.eclipse.EclipseTemplateProcessor;
+import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 import ru.zencoding.eclipse.EclipseZenFile;
+import ru.zencoding.eclipse.preferences.PreferenceConstants;
 import ru.zencoding.eclipse.preferences.TemplateHelper;
 import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
 public class JSExecutor {
 	private volatile static JSExecutor singleton;
-	private Context cx;
-	private Scriptable scope;
-	private Reader fReader;
-	private boolean inited = false; 
-	private String fileName = "zencoding.js";
+	private static Context cx;
+	private static Scriptable scope;
+	private static boolean inited = false; 
+	private static String fileName = "zencoding.js";
 	
 	private Function runActionFn;
 	private Function resetVarsFn;
@@ -46,6 +51,7 @@ public class JSExecutor {
 				cx.evaluateReader(scope, input, getFilename(), 1, null);
 				Object zenFile = Context.javaToJS(new EclipseZenFile(), scope);
 				ScriptableObject.putProperty(scope, "zen_file", zenFile);
+				loadExtensions(cx, scope);
 				inited = cacheRefs();
 			} catch (Exception e) {
 				System.err.println(e.getMessage());
@@ -68,16 +74,23 @@ public class JSExecutor {
 		return singleton;
 	}
 	
+	public static void reset() {
+		if (singleton == null)
+			return;
+		
+		Context.exit();
+		cx = null; 
+		scope = null;
+		singleton = null;
+	}
+	
 	private String getFilename() {
 		return fileName;
 	}
 	
 	private Reader getJSInput() {
-		if (fReader == null) {
-			InputStream is = this.getClass().getResourceAsStream(this.getFilename());
-			fReader = new InputStreamReader(is);
-		}
-		return fReader;
+		InputStream is = this.getClass().getResourceAsStream(this.getFilename());
+		return new InputStreamReader(is);
 	}
 	
 	/**
@@ -207,5 +220,37 @@ public class JSExecutor {
 		}
 		
 		return null;
+	}
+	
+	/**
+	 * Loads Zen Coding extensions from folder
+	 * @param cx
+	 * @param scope
+	 */
+	private void loadExtensions(Context cx, Scriptable scope) {
+		IPreferenceStore store = EclipseZenCodingPlugin.getDefault().getPreferenceStore();
+		String extensionsPath = store.getString(PreferenceConstants.P_EXTENSIONS_PATH);
+		if (extensionsPath != null && extensionsPath.length() > 0) {
+			File extDir = new File(extensionsPath);
+			if (extDir.exists() && extDir.isDirectory()) {
+				File[] files = extDir.listFiles(new FilenameFilter() {
+					@Override
+					public boolean accept(File dir, String name) {
+						return name.endsWith(".js");
+					}
+				});
+				
+				FileInputStream fis = null;
+				for (File file : files) {
+					try {
+						fis = new FileInputStream(file);
+						cx.evaluateReader(scope, new InputStreamReader(fis), file.getName(), 1, null);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
+			}
+			
+		}
 	}
 }
