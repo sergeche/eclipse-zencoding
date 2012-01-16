@@ -103,10 +103,13 @@ public class EditorTypeInvestigator {
 	 */
 	public static String getOutputProfile(EclipseZenEditor editor) {
 		String syntax = getSyntax(editor);
-		if (syntax.equals(TYPE_XML) || syntax.equals(TYPE_XSL))
-			return PROFILE_XML;
-		else
-			// TODO more intelligent output profile guessing
-			return PROFILE_DEFAULT;
+		if (syntax != null) {
+			if (syntax.equals(TYPE_XML) || syntax.equals(TYPE_XSL))
+				return PROFILE_XML;
+			return syntax;
+		}
+		
+		// TODO more intelligent output profile guessing
+		return PROFILE_DEFAULT;
 	}
 }
