@@ -2266,8 +2266,9 @@ zen_coding.define('resources', function(require, _) {
 		if (chain_source) {
 			if (!isParsed(chain_source['extends'])) {
 				var ar = chain_source['extends'].split(',');
+				var utils = require('utils');
 				for (var i = 0; i < ar.length; i++) 
-					ar[i] = trim(ar[i]);
+					ar[i] = utils.trim(ar[i]);
 				chain_source['extends'] = ar;
 				setParsed(chain_source['extends']);
 			}
@@ -3269,9 +3270,9 @@ zen_coding.define('actionUtils', function(require, _) {
 					var reAttr = /([\w\-:]+)(?:\s*=\s*(?:(?:"((?:\\.|[^"])*)")|(?:'((?:\\.|[^'])*)')|([^>\s]+)))?/g;
 					var startTag = tags[0];
 					var tagAttrs = startTag.full_tag.replace(/^<[\w\-\:]+/, '');
+					var parser = require('parser');
 					/** @type TreeNode */
-          var parser = require('parser');
-					var contextNode = new parser.TreeNode();
+					var contextNode = new parser.TreeNode;
 					contextNode.name = startTag.name;
 					
 					// parse attributes
@@ -3482,8 +3483,7 @@ zen_coding.define('base64', function(require, _) {
 });/**
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	// Regular Expressions for parsing tags and attributes
 	var start_tag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/,
 		end_tag = /^<\/([\w\:\-]+)[^>]*>/,
@@ -3998,8 +3998,7 @@ zen_coding.define('elements', function(require, _) {
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
  * @memberOf __zen_parser
- */
-var zen_parser = (/** @constructor */ function(){
+ */var zen_parser = (/** @constructor */ function(){
 	
 	var re_valid_name = /^[\w\d\-_\$\:@!]+\+?$/i;
 	
@@ -6867,8 +6866,7 @@ zen_coding.require('filters').add('bem', (function() {
  * Comment important tags (with 'id' and 'class' attributes)
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-zen_coding.require('filters').add('c', (function() {
+ */zen_coding.require('filters').add('c', (function() {
 	/**
 	 * Add comments to tag
 	 * @param {ZenNode} node
@@ -6920,8 +6918,7 @@ zen_coding.require('filters').add('c', (function() {
  * Filter for escaping unsafe XML characters: <, >, &
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	var char_map = {
 		'<': '&lt;',
 		'>': '&gt;',
@@ -6954,8 +6951,7 @@ zen_coding.require('filters').add('c', (function() {
  * padding:0; → padding: 0;
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	function process(tree, profile) {
 		var elements = zen_coding.require('elements');
 		for (var i = 0, il = tree.children.length; i < il; i++) {
@@ -6984,8 +6980,7 @@ zen_coding.require('filters').add('c', (function() {
  * @link http://chikuyonok.ru
  * 
  * @include "../zen_coding.js"
- */
-(function(){
+ */(function(){
 	var child_token = '${child}',
 		placeholder = '%s';
 	
@@ -7600,8 +7595,7 @@ zen_coding.require('filters').add('c', (function() {
 	}
 	
 	zen_coding.require('filters').add('s', process);
-})();
-/**
+})();/**
  * Trim filter: removes characters at the beginning of the text
  *  content that indicates lists: numbers, #, *, -, etc.
  * @author Sergey Chikuyonok (serge.che@gmail.com)
@@ -7623,14 +7617,12 @@ zen_coding.require('filters').add('c', (function() {
 	}
 	
 	zen_coding.require('filters').add('t', process);
-})();
-/**
+})();/**
  * Filter for trimming "select" attributes from some tags that contains
  * child elements
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */
-(function(){
+ */(function(){
 	var tags = {
 		'xsl:variable': 1,
 		'xsl:with-param': 1
@@ -8938,7 +8930,6 @@ zen_coding.require('actions').add('split_join_tag', function(editor, profileName
 	var matcher = zen_coding.require('html_matcher');
 	var utils = zen_coding.require('utils');
 	var editorUtils = zen_coding.require('editorUtils');
-	var actionUtils = zen_coding.require('actionUtils');
 	
 	/**
 	 * Toggle comment on current editor's selection or HTML tag/CSS rule
@@ -8998,7 +8989,7 @@ zen_coding.require('actions').add('split_join_tag', function(editor, profileName
 			rng = editor.getCurrentLineRange();
 
 			// adjust start index till first non-space character
-			var _r = actionUtils.narrowToNonSpace(String(editor.getContent()), rng.start, rng.end);
+			var _r = editorUtils.narrowToNonSpace(String(editor.getContent()), rng.start, rng.end);
 			rng.start = _r[0];
 			rng.end = _r[1];
 		}
@@ -9480,24 +9471,6 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 	return null;
 });
 /**
- * Sample generator
- */
-var res = zen_coding.require('resources');
-res.addGenerator(/sample(\d*)/i, function(match, abbr, node, syntax) {
-	return 'You entered sample abbreviation with number ' + match[1];
-});
-
-res.addGenerator(/tt/, function(match, abbr, node, syntax) {
-	if (node.getAttribute('class')) {
-		return 'TT with class |' + node.getAttribute('class');
-	}
-	
-	if (node.getAttribute('id')) {
-		return zen_coding.require('elements').create('element', 'p', node.attributes);
-	} 
-	
-	return 'TT!';
-});/**
  * "Lorem ipsum" text generator. Matches lipsum(num)(elem_name) abbreviation.
  * This code is based on Django's contribution: 
  * https://code.djangoproject.com/browser/django/trunk/django/contrib/webdesign/lorem_ipsum.py
@@ -9699,8 +9672,7 @@ res.addGenerator(/tt/, function(match, abbr, node, syntax) {
  * @param {ZenEditor} editor
  * @param {String} action_name
  * @return {Boolean}
- */
-function runZenCodingAction(editor, action_name){
+ */function runZenCodingAction(editor, action_name){
 	var args = [editor];
 	for (var i = 2, il = arguments.length; i < il; i++) {
 		args.push(arguments[i]);
@@ -9822,3 +9794,140 @@ function previewWrapWithAbbreviation(editor, abbr) {
 	
 	return result || null;
 }
+/**
+ * Zen Coding file I/O interface implementation using Java classes 
+ * (for Mozilla Rhino)
+ *
+ * @author Sergey Chikuyonok (serge.che@gmail.com)
+ * @link http://chikuyonok.ru
+ * @version 0.65
+ */
+zen_coding.define('file', function(require, _) {
+	return {
+		/**
+		 * Read file content and return it
+		 * @param {String} path File's relative or absolute path
+		 * @return {String}
+		 * @memberOf __zenFileJava
+		 */
+		read: function(path) {
+			var File = Packages.java.io.File;
+			var f = new File(path),
+				input_stream, c, content = [];
+				
+			if (f.exists() && f.isFile() && f.canRead()) {
+				input_stream = new Packages.java.io.FileInputStream(f);
+				while ((c = input_stream.read()) != -1) {
+					content.push(String.fromCharCode(c));
+				}
+				
+				input_stream.close();
+			}
+
+			return content.join('');
+		},
+
+		/**
+		 * Locate <code>file_name</code> file that relates to <code>editor_file</code>.
+		 * File name may be absolute or relative path
+		 *
+		 * <b>Dealing with absolute path.</b>
+		 * Many modern editors has a "project" support as information unit, but you
+		 * should not rely on project path to find file with absolute path. First,
+		 * it requires user to create a project before using this method (and this
+		 * is not acutually Zen). Second, project path doesn't always points to
+		 * to website's document root folder: it may point, for example, to an
+		 * upper folder which contains server-side scripts.
+		 *
+		 * For better result, you should use the following algorithm in locating
+		 * absolute resources:
+		 * 1) Get parent folder for <code>editor_file</code> as a start point
+		 * 2) Append required <code>file_name</code> to start point and test if
+		 * file exists
+		 * 3) If it doesn't exists, move start point one level up (to parent folder)
+		 * and repeat step 2.
+		 *
+		 * @param {String} editor_file
+		 * @param {String} file_name
+		 * @return {String|null} Returns null if <code>file_name</code> cannot be located
+		 */
+		locateFile: function(editor_file, file_name) {
+			var File = Packages.java.io.File;
+			var f = new File(editor_file),
+				result = '',
+				tmp;
+				
+			// traverse upwards to find image uri
+			while (f.getParent()) {
+				tmp = new File(this.createPath(f.getParent(), file_name));
+				if (tmp.exists()) {
+					result = tmp.getCanonicalPath();
+					break;
+				}
+				
+				f = new File(f.getParent());
+			}
+			
+			return result;
+		},
+
+		/**
+		 * Creates absolute path by concatenating <code>parent</code> and <code>file_name</code>.
+		 * If <code>parent</code> points to file, its parent directory is used
+		 * @param {String} parent
+		 * @param {String} file_name
+		 * @return {String}
+		 */
+		createPath: function(parent, file_name) {
+			var File = Packages.java.io.File,
+				f = new File(parent),
+				result = '';
+				
+			if (f.exists()) {
+				if (f.isFile()) {
+					parent = f.getParent();
+				}
+				
+				var req_file = new File(parent, file_name);
+				result = req_file.getCanonicalPath();
+			}
+			
+			return result;
+		},
+
+		/**
+		 * Saves <code>content</code> as <code>file</code>
+		 * @param {String} file File's asolute path
+		 * @param {String} content File content
+		 */
+		save: function(file, content) {
+			content = content || '';
+			file = String(file);
+			
+			var File = Packages.java.io.File,
+				f = new File(file);
+				
+			if (file.indexOf('/') != -1) {
+				var f_parent = new File(f.getParent());
+				f_parent.mkdirs();
+			}
+			
+			var stream = new Packages.java.io.FileOutputStream(file);
+			for (var i = 0, il = content.length; i < il; i++) {
+				stream.write(content.charCodeAt(i));
+			}
+				
+			stream.close();
+		},
+
+		/**
+		 * Returns file extention in lower case
+		 * @param {String} file
+		 * @return {String}
+		 */
+		getExt: function(file) {
+			var m = (file || '').match(/\.([\w\-]+)$/);
+			return m ? m[1].toLowerCase() : '';
+		}
+	};
+});
