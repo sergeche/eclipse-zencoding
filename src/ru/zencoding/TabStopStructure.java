@@ -3,8 +3,14 @@ package ru.zencoding;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Enumeration;
-import java.util.Properties;
+import java.util.HashMap;
+import java.util.Set;
+
+import org.mozilla.javascript.Context;
+import org.mozilla.javascript.NativeArray;
+import org.mozilla.javascript.NativeObject;
+import org.mozilla.javascript.Scriptable;
+import org.mozilla.javascript.ScriptableObject;
 
 /**
  * A coomon structure that contains list of tabstop groups and valid
@@ -17,19 +23,30 @@ public class TabStopStructure {
 	 * Valid text for current tabstob structure
 	 */
 	private String text = "";
-	private Properties groups;
-	
-	public TabStopStructure() {
-		createGroups();
-	}
+	private HashMap<String, TabStopGroup> groups;
 	
 	public TabStopStructure(String text) {
-		setText(text);
 		createGroups();
+		
+		JSExecutor jse = JSExecutor.getSingleton();
+		Scriptable tabstopData = (Scriptable) jse.execJSFunction("require('tabStops').extract", text);
+		if (tabstopData != null) {
+			text = Context.toString(ScriptableObject.getProperty(tabstopData, "text"));
+			NativeArray tabstops = (NativeArray) ScriptableObject.getProperty(tabstopData, "tabstops");
+			NativeObject tabstopItem;
+			for (int i = 0; i < tabstops.getLength(); i++) {
+				tabstopItem = (NativeObject) ScriptableObject.getProperty(tabstops, i);
+				addTabStopToGroup(
+						Context.toString(ScriptableObject.getProperty(tabstopItem, "group")), 
+						(int) Context.toNumber(ScriptableObject.getProperty(tabstopItem, "start")), 
+						(int) Context.toNumber(ScriptableObject.getProperty(tabstopItem, "end")));
+			}
+		}
+		setText(text);
 	}
 	
 	private void createGroups() {
-		groups = new Properties();
+		groups = new HashMap<String, TabStopGroup>();
 	}
 
 	public void setText(String text) {
@@ -48,7 +65,7 @@ public class TabStopStructure {
 		getTabStopGroup(groupName).addTabStop(start, end);
 	}
 
-	public Properties getGroups() {
+	public HashMap<String, TabStopGroup> getGroups() {
 		return groups;
 	}
 	
@@ -58,25 +75,17 @@ public class TabStopStructure {
 	 */
 	public int getTabStopsCount() {
 		int result = 0;
-		
-		for (Enumeration<Object> elements = groups.elements(); elements.hasMoreElements();) {
-			result += ((TabStopGroup) elements.nextElement()).getLength();
+		for (TabStopGroup item : groups.values()) {
+			result += item.getLength();
 		}
 		
 		return result;
 	}
 	
 	public String[] getSortedGroupKeys() {
-		String[] keys = new String[groups.size()];
-		int counter = 0;
-		
-		for (Enumeration<Object> e = groups.keys(); e.hasMoreElements();) {
-			keys[counter] = (String) e.nextElement();
-			counter++;
-		}
-		
+		Set<String> keySet = groups.keySet();
+		String[] keys = keySet.toArray(new String[keySet.size()]);
 		Arrays.sort(keys);
-		
 		return keys;
 	}
 	

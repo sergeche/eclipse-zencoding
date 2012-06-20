@@ -24,8 +24,6 @@ import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
 
 import ru.zencoding.IZenEditor;
-import ru.zencoding.PlaceholderItem;
-import ru.zencoding.PlaceholderList;
 import ru.zencoding.SelectionData;
 import ru.zencoding.TabStop;
 import ru.zencoding.TabStopGroup;
@@ -37,34 +35,12 @@ public class EclipseZenEditor implements IZenEditor {
 	private IDocument doc;
 	private String caretPlaceholder = "{%::zen-caret::%}";
 	
-	private ArrayList<String> promptProposals;
-	
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
 	
 	private static String DIALOG_PROMPT = "prompt";
 	private static String DIALOG_WRAP_WITH_ABBREVIATION = "wrap";
 	
 	private HashMap<String, ArrayList<String>> proposals;
-	
-	private abstract interface CharTester {
-	  public abstract boolean test(char ch);
-	}
-	
-	/**
-	 * Handles tabstop instance inside text
-	 */
-	private abstract interface TabStopHandler {
-		/**
-		 * Processes single tabstob instance, should return text that will be
-		 * pasted into instead of tabstop
-		 * @param start Start position of tabstob inside text
-		 * @param end End position of tabstob inside text
-		 * @param num Tabstop number
-		 * @param placeholder Tabstop placeholder
-		 * @return
-		 */
-		public abstract String process(int start, int end, String num, String placeholder);
-	}
 	
 	public EclipseZenEditor() {
 		
@@ -77,8 +53,6 @@ public class EclipseZenEditor implements IZenEditor {
 	public void setContext(IEditorPart editor) {
 		this.editor = editor;
 		doc = EclipseZenCodingHelper.getDocument(editor);
-		if (promptProposals == null)
-			promptProposals = new ArrayList<String>();
 		if (proposals == null) {
 			proposals = new HashMap<String, ArrayList<String>>();
 		}
@@ -156,12 +130,13 @@ public class EclipseZenEditor implements IZenEditor {
 	}
 
 	@Override
-	public void replaceContent(String value, int start, int end, boolean no_indent) {
+	public void replaceContent(String value, int start, int end, boolean noIndent) {
 		String newValue = value;
-		if (!no_indent)
+		if (!noIndent)
 			newValue = padString(value, getCurrentLinePadding());
 		
-		TabStopStructure tabStops = handleTabStops(newValue);
+		
+		TabStopStructure tabStops = new TabStopStructure(newValue);
 		newValue = tabStops.getText();
 		
 		try {
@@ -221,155 +196,6 @@ public class EclipseZenEditor implements IZenEditor {
 
 	public String getCurrentLinePadding() {
 		return getStringPadding(getCurrentLine());
-	}
-	
-	/**
-	 * Handle tab-stops (like $1 or ${1:label}) inside text: find them and create
-	 * indexes for linked mode
-	 */
-	private TabStopStructure handleTabStops(String text) {
-		text = text.replaceAll(Pattern.quote(getCaretPlaceholder()), "\\${0:cursor}");
-		
-		// process all tab-stops
-		final HashMap<String, String> placeholders = new HashMap<String, String>();
-		final PlaceholderList pMarks = new PlaceholderList();
-		
-		// remember all placeholder positions first
-		final String originalText = text;
-		text = processTextBeforePaste(text, new TabStopHandler() {
-			@Override
-			public String process(int start, int end, String num, String placeholder) {
-				String ret = "";
-				if (placeholder != null && placeholder.equals("cursor")) {
-					pMarks.add(start, end, "carets", "");
-				} else {
-					if (placeholder != null)
-						placeholders.put(num, placeholder);
-					
-					if (placeholders.containsKey(num))
-						ret = placeholders.get(num);
-					
-					pMarks.add(start, end, num, ret);
-				}
-				return originalText.substring(start, end);
-			}	
-		});
-		
-		// now, replace all placeholders with actual values
-		TabStopStructure tabStops = new TabStopStructure();
-		StringBuilder buf = new StringBuilder();
-		int lastIx = 0;
-		for (int i = 0; i < pMarks.getList().size(); i++) {
-			PlaceholderItem p = pMarks.getList().get(i);
-			
-			buf.append(text.substring(lastIx, p.getStart()));
-			
-			String ph = "";
-			if (!p.getNum().equals("carets") && placeholders.containsKey(p.getNum()))
-				ph = placeholders.get(p.getNum());
-			
-			tabStops.addTabStopToGroup(p.getNum(), buf.length(), buf.length() + ph.length());
-			buf.append(ph);
-			
-			lastIx = p.getEnd();
-		}
-		buf.append(text.substring(lastIx));
-		
-		tabStops.setText(buf.toString());
-		
-		return tabStops;
-	}
-	
-	private int nextWhile(int ix, String text, CharTester fn) {
-		int il = text.length();
-		while (ix < il)
-			if (!fn.test( text.charAt(ix++) )) break;
-		return ix - 1;
-	}
-	
-	/**
-	 * Process text that should be pasted into editor: clear escaped text and
-	 * handle tabstops
-	 * @param {String} text
-	 * @param {Function} escape_fn Handle escaped character. Must return
-	 * replaced value
-	 * @param {Function} tabstop_fn Callback function that will be called on every
-	 * tabstob occurance, passing <b>index</b>, <code>number</code> and 
-	 * <b>value</b> (if exists) arguments. This function must return 
-	 * replacement value
-	 */
-	private String processTextBeforePaste(String text, TabStopHandler handler) {
-		int i = 0;
-		int il = text.length();
-		int startIx = 0;
-		int _i = 0;
-		StringBuilder strBuilder = new StringBuilder();
-		
-		CharTester isNumeric = new CharTester() {
-			@Override
-			public boolean test(char ch) {
-				return Character.isDigit(ch);
-			}
-		};
-		
-		while (i < il) {
-			char ch = text.charAt(i);
-			if (ch == '\\' && i + 1 < il) {
-				// handle escaped character
-				strBuilder.append(text.charAt(i + 1));
-				i += 2;
-				continue;
-			} else if (ch == '$') {
-				// looks like a tabstop
-				char next_ch = '\0';
-				
-				if (i < il)
-					next_ch = text.charAt(i + 1);
-				
-				_i = i;
-				if (isNumeric.test(next_ch)) {
-					// $N placeholder
-					startIx = i + 1;
-					i = nextWhile(startIx, text, isNumeric);
-					if (startIx < i) {
-						strBuilder.append(handler.process(_i, i, text.substring(startIx, i), null));
-						continue;
-					}
-				} else if (next_ch == '{') {
-					// ${N:value} or ${N} placeholder
-					startIx = i + 2;
-					i = nextWhile(startIx, text, isNumeric);
-					
-					if (i > startIx) {
-						if (text.charAt(i) == '}') {
-							strBuilder.append(handler.process(_i, i + 1, text.substring(startIx, i), null));
-							i++; // handle closing brace
-							continue;
-						} else if (text.charAt(i) == ':') {
-							int val_start = i + 2;
-							i = nextWhile(val_start, text, new CharTester() {
-								private int brace_count = 1;
-								public boolean test(char ch) {
-									if (ch == '{') brace_count++;
-									else if (ch == '}') brace_count--;
-									return brace_count != 0;
-								}
-							});
-							strBuilder.append(handler.process(_i, i + 1, text.substring(startIx, val_start - 2), text.substring(val_start - 1, i)));
-							i++; // handle closing brace
-							continue;
-						}
-					}
-				}
-				i = _i;
-			}
-			
-			// push current character to stack
-			strBuilder.append(ch);
-			i++;
-		}
-		
-		return strBuilder.toString();
 	}
 	
 	/**
@@ -564,6 +390,7 @@ public class EclipseZenEditor implements IZenEditor {
 	 * @return
 	 */
 	public String cleanText(String text) {
-		return handleTabStops(text).getText();
+		TabStopStructure tss = new TabStopStructure(text);
+		return tss.getText();
 	}
 }
