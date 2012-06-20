@@ -48,7 +48,7 @@ public class ExpandAbbreviationAction extends AbstractHandler {
 				TabKeyHandler.install(editor.getEditor());
 				
 				// expand abbreviation with current profile
-				return js.runAction(editor, new Object[]{"expand_abbreviation", syntax, profileName});
+				return js.runAction(editor, "expand_abbreviation", syntax, profileName);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}

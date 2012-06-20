@@ -1,4 +1,4 @@
-//     Underscore.js 1.3.0
+//     Underscore.js 1.3.3
 //     (c) 2009-2012 Jeremy Ashkenas, DocumentCloud Inc.
 //     Underscore is freely distributable under the MIT license.
 //     Portions of Underscore are inspired or borrowed from Prototype,
@@ -62,7 +62,7 @@
   }
 
   // Current version.
-  _.VERSION = '1.3.0';
+  _.VERSION = '1.3.3';
 
   // Collection Functions
   // --------------------
@@ -80,7 +80,7 @@
       }
     } else {
       for (var key in obj) {
-        if (hasOwnProperty.call(obj, key)) {
+        if (_.has(obj, key)) {
           if (iterator.call(context, obj[key], key, obj) === breaker) return;
         }
       }
@@ -89,7 +89,7 @@
 
   // Return the results of applying the iterator to each element.
   // Delegates to **ECMAScript 5**'s native `map` if available.
-  _.map = function(obj, iterator, context) {
+  _.map = _.collect = function(obj, iterator, context) {
     var results = [];
     if (obj == null) return results;
     if (nativeMap && obj.map === nativeMap) return obj.map(iterator, context);
@@ -180,7 +180,7 @@
     each(obj, function(value, index, list) {
       if (!(result = result && iterator.call(context, value, index, list))) return breaker;
     });
-    return result;
+    return !!result;
   };
 
   // Determine if at least one element in the object matches a truth test.
@@ -224,7 +224,7 @@
 
   // Return the maximum element or (element-based computation).
   _.max = function(obj, iterator, context) {
-    if (!iterator && _.isArray(obj)) return Math.max.apply(Math, obj);
+    if (!iterator && _.isArray(obj) && obj[0] === +obj[0]) return Math.max.apply(Math, obj);
     if (!iterator && _.isEmpty(obj)) return -Infinity;
     var result = {computed : -Infinity};
     each(obj, function(value, index, list) {
@@ -236,7 +236,7 @@
 
   // Return the minimum element (or element-based computation).
   _.min = function(obj, iterator, context) {
-    if (!iterator && _.isArray(obj)) return Math.min.apply(Math, obj);
+    if (!iterator && _.isArray(obj) && obj[0] === +obj[0]) return Math.min.apply(Math, obj);
     if (!iterator && _.isEmpty(obj)) return Infinity;
     var result = {computed : Infinity};
     each(obj, function(value, index, list) {
@@ -250,19 +250,16 @@
   _.shuffle = function(obj) {
     var shuffled = [], rand;
     each(obj, function(value, index, list) {
-      if (index == 0) {
-        shuffled[0] = value;
-      } else {
-        rand = Math.floor(Math.random() * (index + 1));
-        shuffled[index] = shuffled[rand];
-        shuffled[rand] = value;
-      }
+      rand = Math.floor(Math.random() * (index + 1));
+      shuffled[index] = shuffled[rand];
+      shuffled[rand] = value;
     });
     return shuffled;
   };
 
   // Sort the object's values by a criterion produced by an iterator.
-  _.sortBy = function(obj, iterator, context) {
+  _.sortBy = function(obj, val, context) {
+    var iterator = _.isFunction(val) ? val : function(obj) { return obj[val]; };
     return _.pluck(_.map(obj, function(value, index, list) {
       return {
         value : value,
@@ -270,6 +267,8 @@
       };
     }).sort(function(left, right) {
       var a = left.criteria, b = right.criteria;
+      if (a === void 0) return 1;
+      if (b === void 0) return -1;
       return a < b ? -1 : a > b ? 1 : 0;
     }), 'value');
   };
@@ -299,26 +298,26 @@
   };
 
   // Safely convert anything iterable into a real, live array.
-  _.toArray = function(iterable) {
-    if (!iterable)                return [];
-    if (iterable.toArray)         return iterable.toArray();
-    if (_.isArray(iterable))      return slice.call(iterable);
-    if (_.isArguments(iterable))  return slice.call(iterable);
-    return _.values(iterable);
+  _.toArray = function(obj) {
+    if (!obj)                                     return [];
+    if (_.isArray(obj))                           return slice.call(obj);
+    if (_.isArguments(obj))                       return slice.call(obj);
+    if (obj.toArray && _.isFunction(obj.toArray)) return obj.toArray();
+    return _.values(obj);
   };
 
   // Return the number of elements in an object.
   _.size = function(obj) {
-    return _.toArray(obj).length;
+    return _.isArray(obj) ? obj.length : _.keys(obj).length;
   };
 
   // Array Functions
   // ---------------
 
   // Get the first element of an array. Passing **n** will return the first N
-  // values in the array. Aliased as `head`. The **guard** check allows it to work
-  // with `_.map`.
-  _.first = _.head = function(array, n, guard) {
+  // values in the array. Aliased as `head` and `take`. The **guard** check
+  // allows it to work with `_.map`.
+  _.first = _.head = _.take = function(array, n, guard) {
     return (n != null) && !guard ? slice.call(array, 0, n) : array[0];
   };
 
@@ -372,15 +371,17 @@
   // Aliased as `unique`.
   _.uniq = _.unique = function(array, isSorted, iterator) {
     var initial = iterator ? _.map(array, iterator) : array;
-    var result = [];
-    _.reduce(initial, function(memo, el, i) {
-      if (0 == i || (isSorted === true ? _.last(memo) != el : !_.include(memo, el))) {
-        memo[memo.length] = el;
-        result[result.length] = array[i];
+    var results = [];
+    // The `isSorted` flag is irrelevant if the array only contains two elements.
+    if (array.length < 3) isSorted = true;
+    _.reduce(initial, function (memo, value, index) {
+      if (isSorted ? _.last(memo) !== value || !memo.length : !_.include(memo, value)) {
+        memo.push(value);
+        results.push(array[index]);
       }
       return memo;
     }, []);
-    return result;
+    return results;
   };
 
   // Produce an array that contains the union: each distinct element from all of
@@ -403,7 +404,7 @@
   // Take the difference between one array and a number of other arrays.
   // Only the elements present in just the first array will remain.
   _.difference = function(array) {
-    var rest = _.flatten(slice.call(arguments, 1));
+    var rest = _.flatten(slice.call(arguments, 1), true);
     return _.filter(array, function(value){ return !_.include(rest, value); });
   };
 
@@ -506,7 +507,7 @@
     hasher || (hasher = _.identity);
     return function() {
       var key = hasher.apply(this, arguments);
-      return hasOwnProperty.call(memo, key) ? memo[key] : (memo[key] = func.apply(this, arguments));
+      return _.has(memo, key) ? memo[key] : (memo[key] = func.apply(this, arguments));
     };
   };
 
@@ -514,7 +515,7 @@
   // it with the arguments supplied.
   _.delay = function(func, wait) {
     var args = slice.call(arguments, 2);
-    return setTimeout(function(){ return func.apply(func, args); }, wait);
+    return setTimeout(function(){ return func.apply(null, args); }, wait);
   };
 
   // Defers a function, scheduling it to run after the current call stack has
@@ -526,7 +527,7 @@
   // Returns a function, that, when invoked, will only be triggered at most once
   // during a given window of time.
   _.throttle = function(func, wait) {
-    var context, args, timeout, throttling, more;
+    var context, args, timeout, throttling, more, result;
     var whenDone = _.debounce(function(){ more = throttling = false; }, wait);
     return function() {
       context = this; args = arguments;
@@ -539,24 +540,27 @@
       if (throttling) {
         more = true;
       } else {
-        func.apply(context, args);
+        result = func.apply(context, args);
       }
       whenDone();
       throttling = true;
+      return result;
     };
   };
 
   // Returns a function, that, as long as it continues to be invoked, will not
   // be triggered. The function will be called after it stops being called for
-  // N milliseconds.
-  _.debounce = function(func, wait) {
+  // N milliseconds. If `immediate` is passed, trigger the function on the
+  // leading edge, instead of the trailing.
+  _.debounce = function(func, wait, immediate) {
     var timeout;
     return function() {
       var context = this, args = arguments;
       var later = function() {
         timeout = null;
-        func.apply(context, args);
+        if (!immediate) func.apply(context, args);
       };
+      if (immediate && !timeout) func.apply(context, args);
       clearTimeout(timeout);
       timeout = setTimeout(later, wait);
     };
@@ -612,7 +616,7 @@
   _.keys = nativeKeys || function(obj) {
     if (obj !== Object(obj)) throw new TypeError('Invalid object');
     var keys = [];
-    for (var key in obj) if (hasOwnProperty.call(obj, key)) keys[keys.length] = key;
+    for (var key in obj) if (_.has(obj, key)) keys[keys.length] = key;
     return keys;
   };
 
@@ -635,10 +639,19 @@
   _.extend = function(obj) {
     each(slice.call(arguments, 1), function(source) {
       for (var prop in source) {
-        if (source[prop] !== void 0) obj[prop] = source[prop];
+        obj[prop] = source[prop];
       }
     });
     return obj;
+  };
+
+  // Return a copy of the object only containing the whitelisted properties.
+  _.pick = function(obj) {
+    var result = {};
+    each(_.flatten(slice.call(arguments, 1)), function(key) {
+      if (key in obj) result[key] = obj[key];
+    });
+    return result;
   };
 
   // Fill in a given object with default properties.
@@ -733,17 +746,17 @@
       if ('constructor' in a != 'constructor' in b || a.constructor != b.constructor) return false;
       // Deep compare objects.
       for (var key in a) {
-        if (hasOwnProperty.call(a, key)) {
+        if (_.has(a, key)) {
           // Count the expected number of properties.
           size++;
           // Deep compare each member.
-          if (!(result = hasOwnProperty.call(b, key) && eq(a[key], b[key], stack))) break;
+          if (!(result = _.has(b, key) && eq(a[key], b[key], stack))) break;
         }
       }
       // Ensure that both objects contain the same number of properties.
       if (result) {
         for (key in b) {
-          if (hasOwnProperty.call(b, key) && !(size--)) break;
+          if (_.has(b, key) && !(size--)) break;
         }
         result = !size;
       }
@@ -761,8 +774,9 @@
   // Is a given array, string, or object empty?
   // An "empty" object has no enumerable own-properties.
   _.isEmpty = function(obj) {
+    if (obj == null) return true;
     if (_.isArray(obj) || _.isString(obj)) return obj.length === 0;
-    for (var key in obj) if (hasOwnProperty.call(obj, key)) return false;
+    for (var key in obj) if (_.has(obj, key)) return false;
     return true;
   };
 
@@ -788,7 +802,7 @@
   };
   if (!_.isArguments(arguments)) {
     _.isArguments = function(obj) {
-      return !!(obj && hasOwnProperty.call(obj, 'callee'));
+      return !!(obj && _.has(obj, 'callee'));
     };
   }
 
@@ -805,6 +819,11 @@
   // Is a given value a number?
   _.isNumber = function(obj) {
     return toString.call(obj) == '[object Number]';
+  };
+
+  // Is a given object a finite number?
+  _.isFinite = function(obj) {
+    return _.isNumber(obj) && isFinite(obj);
   };
 
   // Is the given value `NaN`?
@@ -838,6 +857,11 @@
     return obj === void 0;
   };
 
+  // Has own property?
+  _.has = function(obj, key) {
+    return hasOwnProperty.call(obj, key);
+  };
+
   // Utility Functions
   // -----------------
 
@@ -861,6 +885,14 @@
   // Escape a string for HTML interpolation.
   _.escape = function(string) {
     return (''+string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;').replace(/\//g,'&#x2F;');
+  };
+
+  // If the value of the named property is a function then invoke it;
+  // otherwise, return it.
+  _.result = function(object, property) {
+    if (object == null) return null;
+    var value = object[property];
+    return _.isFunction(value) ? value.call(object) : value;
   };
 
   // Add your own custom functions to the Underscore object, ensuring that
@@ -892,35 +924,72 @@
   // guaranteed not to match.
   var noMatch = /.^/;
 
+  // Certain characters need to be escaped so that they can be put into a
+  // string literal.
+  var escapes = {
+    '\\': '\\',
+    "'": "'",
+    'r': '\r',
+    'n': '\n',
+    't': '\t',
+    'u2028': '\u2028',
+    'u2029': '\u2029'
+  };
+
+  for (var p in escapes) escapes[escapes[p]] = p;
+  var escaper = /\\|'|\r|\n|\t|\u2028|\u2029/g;
+  var unescaper = /\\(\\|'|r|n|t|u2028|u2029)/g;
+
+  // Within an interpolation, evaluation, or escaping, remove HTML escaping
+  // that had been previously added.
+  var unescape = function(code) {
+    return code.replace(unescaper, function(match, escape) {
+      return escapes[escape];
+    });
+  };
+
   // JavaScript micro-templating, similar to John Resig's implementation.
   // Underscore templating handles arbitrary delimiters, preserves whitespace,
   // and correctly escapes quotes within interpolated code.
-  _.template = function(str, data) {
-    var c  = _.templateSettings;
-    var tmpl = 'var __p=[],print=function(){__p.push.apply(__p,arguments);};' +
-      'with(obj||{}){__p.push(\'' +
-      str.replace(/\\/g, '\\\\')
-         .replace(/'/g, "\\'")
-         .replace(c.escape || noMatch, function(match, code) {
-           return "',_.escape(" + code.replace(/\\'/g, "'") + "),'";
-         })
-         .replace(c.interpolate || noMatch, function(match, code) {
-           return "'," + code.replace(/\\'/g, "'") + ",'";
-         })
-         .replace(c.evaluate || noMatch, function(match, code) {
-           return "');" + code.replace(/\\'/g, "'")
-                              .replace(/[\r\n\t]/g, ' ')
-                              .replace(/\\\\/g, '\\') + ";__p.push('";
-         })
-         .replace(/\r/g, '\\r')
-         .replace(/\n/g, '\\n')
-         .replace(/\t/g, '\\t')
-         + "');}return __p.join('');";
-    var func = new Function('obj', '_', tmpl);
-    if (data) return func(data, _);
-    return function(data) {
-      return func.call(this, data, _);
+  _.template = function(text, data, settings) {
+    settings = _.defaults(settings || {}, _.templateSettings);
+
+    // Compile the template source, taking care to escape characters that
+    // cannot be included in a string literal and then unescape them in code
+    // blocks.
+    var source = "__p+='" + text
+      .replace(escaper, function(match) {
+        return '\\' + escapes[match];
+      })
+      .replace(settings.escape || noMatch, function(match, code) {
+        return "'+\n_.escape(" + unescape(code) + ")+\n'";
+      })
+      .replace(settings.interpolate || noMatch, function(match, code) {
+        return "'+\n(" + unescape(code) + ")+\n'";
+      })
+      .replace(settings.evaluate || noMatch, function(match, code) {
+        return "';\n" + unescape(code) + "\n;__p+='";
+      }) + "';\n";
+
+    // If a variable is not specified, place data values in local scope.
+    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
+
+    source = "var __p='';" +
+      "var print=function(){__p+=Array.prototype.join.call(arguments, '')};\n" +
+      source + "return __p;\n";
+
+    var render = new Function(settings.variable || 'obj', '_', source);
+    if (data) return render(data, _);
+    var template = function(data) {
+      return render.call(this, data, _);
     };
+
+    // Provide the compiled function source as a convenience for build time
+    // precompilation.
+    template.source = 'function(' + (settings.variable || 'obj') + '){\n' +
+      source + '}';
+
+    return template;
   };
 
   // Add a "chain" function, which will delegate to the wrapper.
@@ -989,747 +1058,82 @@
 
 }).call(this);
 /**
- * Zen Coding settings
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
- */
-var zen_settings = {
-	/** 
-	 * Variables that can be placed inside snippets or abbreviations as ${variable}
-	 * ${child} variable is reserved, don't use it 
-	 */
-	'variables': {
-		'lang': 'en',
-		'locale': 'en-US',
-		'charset': 'UTF-8',
-		
-		/** Inner element indentation */
-		'indentation': '\t',
-		
-		// newline variables, useful for wrapping
-		'newline': '\n',
-		'nl': '\n'
-	},
-	
-	'css': {
-		'filters': 'html,css',
-		'snippets': {
-			"@i": "@import url(|);",
-			"@m": "@media print {\n\t|\n}",
-			"@f": "@font-face {\n\tfont-family:|;\n\tsrc:url(|);\n}",
-			"!": "!important",
-			"pos": "position:|;",
-			"pos:s": "position:static;",
-			"pos:a": "position:absolute;",
-			"pos:r": "position:relative;",
-			"pos:f": "position:fixed;",
-			"t": "top:|;",
-			"t:a": "top:auto;",
-			"r": "right:|;",
-			"r:a": "right:auto;",
-			"b": "bottom:|;",
-			"b:a": "bottom:auto;",
-			"brad": "-webkit-border-radius: ${1:radius};\n-moz-border-radius: $1;\n-ms-border-radius: $1;\nborder-radius: $1;",
-			"bsha": "-webkit-box-shadow: ${1:hoff} ${2:voff} ${3:blur} ${4:rgba(0,0,0,0.5)};\n-moz-box-shadow: $1 $2 $3 $4;\n-ms-box-shadow: $1 $2 $3 $4;\nbox-shadow: $1 $2 $3 $4;",
-			"l": "left:|;",
-			"l:a": "left:auto;",
-			"z": "z-index:|;",
-			"z:a": "z-index:auto;",
-			"fl": "float:|;",
-			"fl:n": "float:none;",
-			"fl:l": "float:left;",
-			"fl:r": "float:right;",
-			"cl": "clear:|;",
-			"cl:n": "clear:none;",
-			"cl:l": "clear:left;",
-			"cl:r": "clear:right;",
-			"cl:b": "clear:both;",
-			"d": "display:|;",
-			"d:n": "display:none;",
-			"d:b": "display:block;",
-			"d:i": "display:inline;",
-			"d:ib": "display:inline-block;",
-			"d:li": "display:list-item;",
-			"d:ri": "display:run-in;",
-			"d:cp": "display:compact;",
-			"d:tb": "display:table;",
-			"d:itb": "display:inline-table;",
-			"d:tbcp": "display:table-caption;",
-			"d:tbcl": "display:table-column;",
-			"d:tbclg": "display:table-column-group;",
-			"d:tbhg": "display:table-header-group;",
-			"d:tbfg": "display:table-footer-group;",
-			"d:tbr": "display:table-row;",
-			"d:tbrg": "display:table-row-group;",
-			"d:tbc": "display:table-cell;",
-			"d:rb": "display:ruby;",
-			"d:rbb": "display:ruby-base;",
-			"d:rbbg": "display:ruby-base-group;",
-			"d:rbt": "display:ruby-text;",
-			"d:rbtg": "display:ruby-text-group;",
-			"v": "visibility:|;",
-			"v:v": "visibility:visible;",
-			"v:h": "visibility:hidden;",
-			"v:c": "visibility:collapse;",
-			"ov": "overflow:|;",
-			"ov:v": "overflow:visible;",
-			"ov:h": "overflow:hidden;",
-			"ov:s": "overflow:scroll;",
-			"ov:a": "overflow:auto;",
-			"ovx": "overflow-x:|;",
-			"ovx:v": "overflow-x:visible;",
-			"ovx:h": "overflow-x:hidden;",
-			"ovx:s": "overflow-x:scroll;",
-			"ovx:a": "overflow-x:auto;",
-			"ovy": "overflow-y:|;",
-			"ovy:v": "overflow-y:visible;",
-			"ovy:h": "overflow-y:hidden;",
-			"ovy:s": "overflow-y:scroll;",
-			"ovy:a": "overflow-y:auto;",
-			"ovs": "overflow-style:|;",
-			"ovs:a": "overflow-style:auto;",
-			"ovs:s": "overflow-style:scrollbar;",
-			"ovs:p": "overflow-style:panner;",
-			"ovs:m": "overflow-style:move;",
-			"ovs:mq": "overflow-style:marquee;",
-			"zoo": "zoom:1;",
-			"cp": "clip:|;",
-			"cp:a": "clip:auto;",
-			"cp:r": "clip:rect(|);",
-			"bxz": "box-sizing:|;",
-			"bxz:cb": "box-sizing:content-box;",
-			"bxz:bb": "box-sizing:border-box;",
-			"bxsh": "box-shadow:|;",
-			"bxsh:n": "box-shadow:none;",
-			"bxsh:w": "-webkit-box-shadow:0 0 0 #000;",
-			"bxsh:m": "-moz-box-shadow:0 0 0 0 #000;",
-			"m": "margin:|;",
-			"m:a": "margin:auto;",
-			"m:0": "margin:0;",
-			"m:2": "margin:0 0;",
-			"m:3": "margin:0 0 0;",
-			"m:4": "margin:0 0 0 0;",
-			"mt": "margin-top:|;",
-			"mt:a": "margin-top:auto;",
-			"mr": "margin-right:|;",
-			"mr:a": "margin-right:auto;",
-			"mb": "margin-bottom:|;",
-			"mb:a": "margin-bottom:auto;",
-			"ml": "margin-left:|;",
-			"ml:a": "margin-left:auto;",
-			"p": "padding:|;",
-			"p:0": "padding:0;",
-			"p:2": "padding:0 0;",
-			"p:3": "padding:0 0 0;",
-			"p:4": "padding:0 0 0 0;",
-			"pt": "padding-top:|;",
-			"pr": "padding-right:|;",
-			"pb": "padding-bottom:|;",
-			"pl": "padding-left:|;",
-			"w": "width:|;",
-			"w:a": "width:auto;",
-			"h": "height:|;",
-			"h:a": "height:auto;",
-			"maw": "max-width:|;",
-			"maw:n": "max-width:none;",
-			"mah": "max-height:|;",
-			"mah:n": "max-height:none;",
-			"miw": "min-width:|;",
-			"mih": "min-height:|;",
-			"o": "outline:|;",
-			"o:n": "outline:none;",
-			"oo": "outline-offset:|;",
-			"ow": "outline-width:|;",
-			"os": "outline-style:|;",
-			"oc": "outline-color:#000;",
-			"oc:i": "outline-color:invert;",
-			"bd": "border:|;",
-			"bd+": "border:1px solid #000;",
-			"bd:n": "border:none;",
-			"bdbk": "border-break:|;",
-			"bdbk:c": "border-break:close;",
-			"bdcl": "border-collapse:|;",
-			"bdcl:c": "border-collapse:collapse;",
-			"bdcl:s": "border-collapse:separate;",
-			"bdc": "border-color:#000;",
-			"bdi": "border-image:url(|);",
-			"bdi:n": "border-image:none;",
-			"bdi:w": "-webkit-border-image:url(|) 0 0 0 0 stretch stretch;",
-			"bdi:m": "-moz-border-image:url(|) 0 0 0 0 stretch stretch;",
-			"bdti": "border-top-image:url(|);",
-			"bdti:n": "border-top-image:none;",
-			"bdri": "border-right-image:url(|);",
-			"bdri:n": "border-right-image:none;",
-			"bdbi": "border-bottom-image:url(|);",
-			"bdbi:n": "border-bottom-image:none;",
-			"bdli": "border-left-image:url(|);",
-			"bdli:n": "border-left-image:none;",
-			"bdci": "border-corner-image:url(|);",
-			"bdci:n": "border-corner-image:none;",
-			"bdci:c": "border-corner-image:continue;",
-			"bdtli": "border-top-left-image:url(|);",
-			"bdtli:n": "border-top-left-image:none;",
-			"bdtli:c": "border-top-left-image:continue;",
-			"bdtri": "border-top-right-image:url(|);",
-			"bdtri:n": "border-top-right-image:none;",
-			"bdtri:c": "border-top-right-image:continue;",
-			"bdbri": "border-bottom-right-image:url(|);",
-			"bdbri:n": "border-bottom-right-image:none;",
-			"bdbri:c": "border-bottom-right-image:continue;",
-			"bdbli": "border-bottom-left-image:url(|);",
-			"bdbli:n": "border-bottom-left-image:none;",
-			"bdbli:c": "border-bottom-left-image:continue;",
-			"bdf": "border-fit:|;",
-			"bdf:c": "border-fit:clip;",
-			"bdf:r": "border-fit:repeat;",
-			"bdf:sc": "border-fit:scale;",
-			"bdf:st": "border-fit:stretch;",
-			"bdf:ow": "border-fit:overwrite;",
-			"bdf:of": "border-fit:overflow;",
-			"bdf:sp": "border-fit:space;",
-			"bdl": "border-length:|;",
-			"bdl:a": "border-length:auto;",
-			"bdsp": "border-spacing:|;",
-			"bds": "border-style:|;",
-			"bds:n": "border-style:none;",
-			"bds:h": "border-style:hidden;",
-			"bds:dt": "border-style:dotted;",
-			"bds:ds": "border-style:dashed;",
-			"bds:s": "border-style:solid;",
-			"bds:db": "border-style:double;",
-			"bds:dtds": "border-style:dot-dash;",
-			"bds:dtdtds": "border-style:dot-dot-dash;",
-			"bds:w": "border-style:wave;",
-			"bds:g": "border-style:groove;",
-			"bds:r": "border-style:ridge;",
-			"bds:i": "border-style:inset;",
-			"bds:o": "border-style:outset;",
-			"bdw": "border-width:|;",
-			"bdt": "border-top:|;",
-			"bdt+": "border-top:1px solid #000;",
-			"bdt:n": "border-top:none;",
-			"bdtw": "border-top-width:|;",
-			"bdts": "border-top-style:|;",
-			"bdts:n": "border-top-style:none;",
-			"bdtc": "border-top-color:#000;",
-			"bdr": "border-right:|;",
-			"bdr+": "border-right:1px solid #000;",
-			"bdr:n": "border-right:none;",
-			"bdrw": "border-right-width:|;",
-			"bdrs": "border-right-style:|;",
-			"bdrs:n": "border-right-style:none;",
-			"bdrc": "border-right-color:#000;",
-			"bdb": "border-bottom:|;",
-			"bdb+": "border-bottom:1px solid #000;",
-			"bdb:n": "border-bottom:none;",
-			"bdbw": "border-bottom-width:|;",
-			"bdbs": "border-bottom-style:|;",
-			"bdbs:n": "border-bottom-style:none;",
-			"bdbc": "border-bottom-color:#000;",
-			"bdl": "border-left:|;",
-			"bdl+": "border-left:1px solid #000;",
-			"bdl:n": "border-left:none;",
-			"bdlw": "border-left-width:|;",
-			"bdls": "border-left-style:|;",
-			"bdls:n": "border-left-style:none;",
-			"bdlc": "border-left-color:#000;",
-			"bdrs": "border-radius:|;",
-			"bdtrrs": "border-top-right-radius:|;",
-			"bdtlrs": "border-top-left-radius:|;",
-			"bdbrrs": "border-bottom-right-radius:|;",
-			"bdblrs": "border-bottom-left-radius:|;",
-			"bg": "background:|;",
-			"bg+": "background:#FFF url(|) 0 0 no-repeat;",
-			"bg:n": "background:none;",
-			"bg:ie": "filter:progid:DXImageTransform.Microsoft.AlphaImageLoader(src='${1:x}.png',sizingMethod='${2:crop}');",
-			"bgc": "background-color:#FFF;",
-			"bgi": "background-image:url(|);",
-			"bgi:n": "background-image:none;",
-			"bgr": "background-repeat:|;",
-			"bgr:n": "background-repeat:no-repeat;",
-			"bgr:x": "background-repeat:repeat-x;",
-			"bgr:y": "background-repeat:repeat-y;",
-			"bga": "background-attachment:|;",
-			"bga:f": "background-attachment:fixed;",
-			"bga:s": "background-attachment:scroll;",
-			"bgp": "background-position:0 0;",
-			"bgpx": "background-position-x:|;",
-			"bgpy": "background-position-y:|;",
-			"bgbk": "background-break:|;",
-			"bgbk:bb": "background-break:bounding-box;",
-			"bgbk:eb": "background-break:each-box;",
-			"bgbk:c": "background-break:continuous;",
-			"bgcp": "background-clip:|;",
-			"bgcp:bb": "background-clip:border-box;",
-			"bgcp:pb": "background-clip:padding-box;",
-			"bgcp:cb": "background-clip:content-box;",
-			"bgcp:nc": "background-clip:no-clip;",
-			"bgo": "background-origin:|;",
-			"bgo:pb": "background-origin:padding-box;",
-			"bgo:bb": "background-origin:border-box;",
-			"bgo:cb": "background-origin:content-box;",
-			"bgz": "background-size:|;",
-			"bgz:a": "background-size:auto;",
-			"bgz:ct": "background-size:contain;",
-			"bgz:cv": "background-size:cover;",
-			"c": "color:#000;",
-			"tbl": "table-layout:|;",
-			"tbl:a": "table-layout:auto;",
-			"tbl:f": "table-layout:fixed;",
-			"cps": "caption-side:|;",
-			"cps:t": "caption-side:top;",
-			"cps:b": "caption-side:bottom;",
-			"ec": "empty-cells:|;",
-			"ec:s": "empty-cells:show;",
-			"ec:h": "empty-cells:hide;",
-			"lis": "list-style:|;",
-			"lis:n": "list-style:none;",
-			"lisp": "list-style-position:|;",
-			"lisp:i": "list-style-position:inside;",
-			"lisp:o": "list-style-position:outside;",
-			"list": "list-style-type:|;",
-			"list:n": "list-style-type:none;",
-			"list:d": "list-style-type:disc;",
-			"list:c": "list-style-type:circle;",
-			"list:s": "list-style-type:square;",
-			"list:dc": "list-style-type:decimal;",
-			"list:dclz": "list-style-type:decimal-leading-zero;",
-			"list:lr": "list-style-type:lower-roman;",
-			"list:ur": "list-style-type:upper-roman;",
-			"lisi": "list-style-image:|;",
-			"lisi:n": "list-style-image:none;",
-			"q": "quotes:|;",
-			"q:n": "quotes:none;",
-			"q:ru": "quotes:'\00AB' '\00BB' '\201E' '\201C';",
-			"q:en": "quotes:'\201C' '\201D' '\2018' '\2019';",
-			"ct": "content:|;",
-			"ct:n": "content:normal;",
-			"ct:oq": "content:open-quote;",
-			"ct:noq": "content:no-open-quote;",
-			"ct:cq": "content:close-quote;",
-			"ct:ncq": "content:no-close-quote;",
-			"ct:a": "content:attr(|);",
-			"ct:c": "content:counter(|);",
-			"ct:cs": "content:counters(|);",
-			"coi": "counter-increment:|;",
-			"cor": "counter-reset:|;",
-			"va": "vertical-align:|;",
-			"va:sup": "vertical-align:super;",
-			"va:t": "vertical-align:top;",
-			"va:tt": "vertical-align:text-top;",
-			"va:m": "vertical-align:middle;",
-			"va:bl": "vertical-align:baseline;",
-			"va:b": "vertical-align:bottom;",
-			"va:tb": "vertical-align:text-bottom;",
-			"va:sub": "vertical-align:sub;",
-			"ta": "text-align:|;",
-			"ta:l": "text-align:left;",
-			"ta:c": "text-align:center;",
-			"ta:r": "text-align:right;",
-			"tal": "text-align-last:|;",
-			"tal:a": "text-align-last:auto;",
-			"tal:l": "text-align-last:left;",
-			"tal:c": "text-align-last:center;",
-			"tal:r": "text-align-last:right;",
-			"td": "text-decoration:|;",
-			"td:n": "text-decoration:none;",
-			"td:u": "text-decoration:underline;",
-			"td:o": "text-decoration:overline;",
-			"td:l": "text-decoration:line-through;",
-			"te": "text-emphasis:|;",
-			"te:n": "text-emphasis:none;",
-			"te:ac": "text-emphasis:accent;",
-			"te:dt": "text-emphasis:dot;",
-			"te:c": "text-emphasis:circle;",
-			"te:ds": "text-emphasis:disc;",
-			"te:b": "text-emphasis:before;",
-			"te:a": "text-emphasis:after;",
-			"th": "text-height:|;",
-			"th:a": "text-height:auto;",
-			"th:f": "text-height:font-size;",
-			"th:t": "text-height:text-size;",
-			"th:m": "text-height:max-size;",
-			"ti": "text-indent:|;",
-			"ti:-": "text-indent:-9999px;",
-			"tj": "text-justify:|;",
-			"tj:a": "text-justify:auto;",
-			"tj:iw": "text-justify:inter-word;",
-			"tj:ii": "text-justify:inter-ideograph;",
-			"tj:ic": "text-justify:inter-cluster;",
-			"tj:d": "text-justify:distribute;",
-			"tj:k": "text-justify:kashida;",
-			"tj:t": "text-justify:tibetan;",
-			"to": "text-outline:|;",
-			"to+": "text-outline:0 0 #000;",
-			"to:n": "text-outline:none;",
-			"tr": "text-replace:|;",
-			"tr:n": "text-replace:none;",
-			"tt": "text-transform:|;",
-			"tt:n": "text-transform:none;",
-			"tt:c": "text-transform:capitalize;",
-			"tt:u": "text-transform:uppercase;",
-			"tt:l": "text-transform:lowercase;",
-			"tw": "text-wrap:|;",
-			"tw:n": "text-wrap:normal;",
-			"tw:no": "text-wrap:none;",
-			"tw:u": "text-wrap:unrestricted;",
-			"tw:s": "text-wrap:suppress;",
-			"tsh": "text-shadow:|;",
-			"tsh+": "text-shadow:0 0 0 #000;",
-			"tsh:n": "text-shadow:none;",
-			"lh": "line-height:|;",
-			"whs": "white-space:|;",
-			"whs:n": "white-space:normal;",
-			"whs:p": "white-space:pre;",
-			"whs:nw": "white-space:nowrap;",
-			"whs:pw": "white-space:pre-wrap;",
-			"whs:pl": "white-space:pre-line;",
-			"whsc": "white-space-collapse:|;",
-			"whsc:n": "white-space-collapse:normal;",
-			"whsc:k": "white-space-collapse:keep-all;",
-			"whsc:l": "white-space-collapse:loose;",
-			"whsc:bs": "white-space-collapse:break-strict;",
-			"whsc:ba": "white-space-collapse:break-all;",
-			"wob": "word-break:|;",
-			"wob:n": "word-break:normal;",
-			"wob:k": "word-break:keep-all;",
-			"wob:l": "word-break:loose;",
-			"wob:bs": "word-break:break-strict;",
-			"wob:ba": "word-break:break-all;",
-			"wos": "word-spacing:|;",
-			"wow": "word-wrap:|;",
-			"wow:nm": "word-wrap:normal;",
-			"wow:n": "word-wrap:none;",
-			"wow:u": "word-wrap:unrestricted;",
-			"wow:s": "word-wrap:suppress;",
-			"lts": "letter-spacing:|;",
-			"f": "font:|;",
-			"f+": "font:1em Arial,sans-serif;",
-			"fw": "font-weight:|;",
-			"fw:n": "font-weight:normal;",
-			"fw:b": "font-weight:bold;",
-			"fw:br": "font-weight:bolder;",
-			"fw:lr": "font-weight:lighter;",
-			"fs": "font-style:|;",
-			"fs:n": "font-style:normal;",
-			"fs:i": "font-style:italic;",
-			"fs:o": "font-style:oblique;",
-			"fv": "font-variant:|;",
-			"fv:n": "font-variant:normal;",
-			"fv:sc": "font-variant:small-caps;",
-			"fz": "font-size:|;",
-			"fza": "font-size-adjust:|;",
-			"fza:n": "font-size-adjust:none;",
-			"ff": "font-family:|;",
-			"ff:s": "font-family:serif;",
-			"ff:ss": "font-family:sans-serif;",
-			"ff:c": "font-family:cursive;",
-			"ff:f": "font-family:fantasy;",
-			"ff:m": "font-family:monospace;",
-			"fef": "font-effect:|;",
-			"fef:n": "font-effect:none;",
-			"fef:eg": "font-effect:engrave;",
-			"fef:eb": "font-effect:emboss;",
-			"fef:o": "font-effect:outline;",
-			"fem": "font-emphasize:|;",
-			"femp": "font-emphasize-position:|;",
-			"femp:b": "font-emphasize-position:before;",
-			"femp:a": "font-emphasize-position:after;",
-			"fems": "font-emphasize-style:|;",
-			"fems:n": "font-emphasize-style:none;",
-			"fems:ac": "font-emphasize-style:accent;",
-			"fems:dt": "font-emphasize-style:dot;",
-			"fems:c": "font-emphasize-style:circle;",
-			"fems:ds": "font-emphasize-style:disc;",
-			"fsm": "font-smooth:|;",
-			"fsm:a": "font-smooth:auto;",
-			"fsm:n": "font-smooth:never;",
-			"fsm:aw": "font-smooth:always;",
-			"fst": "font-stretch:|;",
-			"fst:n": "font-stretch:normal;",
-			"fst:uc": "font-stretch:ultra-condensed;",
-			"fst:ec": "font-stretch:extra-condensed;",
-			"fst:c": "font-stretch:condensed;",
-			"fst:sc": "font-stretch:semi-condensed;",
-			"fst:se": "font-stretch:semi-expanded;",
-			"fst:e": "font-stretch:expanded;",
-			"fst:ee": "font-stretch:extra-expanded;",
-			"fst:ue": "font-stretch:ultra-expanded;",
-			"op": "opacity:|;",
-			"op:ie": "filter:progid:DXImageTransform.Microsoft.Alpha(Opacity=100);",
-			"op:ms": "-ms-filter:'progid:DXImageTransform.Microsoft.Alpha(Opacity=100)';",
-			"rz": "resize:|;",
-			"rz:n": "resize:none;",
-			"rz:b": "resize:both;",
-			"rz:h": "resize:horizontal;",
-			"rz:v": "resize:vertical;",
-			"cur": "cursor:|;",
-			"cur:a": "cursor:auto;",
-			"cur:d": "cursor:default;",
-			"cur:c": "cursor:crosshair;",
-			"cur:ha": "cursor:hand;",
-			"cur:he": "cursor:help;",
-			"cur:m": "cursor:move;",
-			"cur:p": "cursor:pointer;",
-			"cur:t": "cursor:text;",
-			"pgbb": "page-break-before:|;",
-			"pgbb:au": "page-break-before:auto;",
-			"pgbb:al": "page-break-before:always;",
-			"pgbb:l": "page-break-before:left;",
-			"pgbb:r": "page-break-before:right;",
-			"pgbi": "page-break-inside:|;",
-			"pgbi:au": "page-break-inside:auto;",
-			"pgbi:av": "page-break-inside:avoid;",
-			"pgba": "page-break-after:|;",
-			"pgba:au": "page-break-after:auto;",
-			"pgba:al": "page-break-after:always;",
-			"pgba:l": "page-break-after:left;",
-			"pgba:r": "page-break-after:right;",
-			"orp": "orphans:|;",
-			"wid": "widows:|;"
-		}
-	},
-	
-	'html': {
-		'filters': 'html',
-		'snippets': {
-			'cc:ie6': '<!--[if lte IE 6]>\n\t${child}|\n<![endif]-->',
-			'cc:ie': '<!--[if IE]>\n\t${child}|\n<![endif]-->',
-			'cc:noie': '<!--[if !IE]><!-->\n\t${child}|\n<!--<![endif]-->',
-			'html:4t': '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">\n' +
-					'<html lang="${lang}">\n' +
-					'<head>\n' +
-					'	<meta http-equiv="Content-Type" content="text/html;charset=${charset}">\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>',
-			
-			'html:4s': '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">\n' +
-					'<html lang="${lang}">\n' +
-					'<head>\n' +
-					'	<meta http-equiv="Content-Type" content="text/html;charset=${charset}">\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>',
-			
-			'html:xt': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n' +
-					'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${lang}">\n' +
-					'<head>\n' +
-					'	<meta http-equiv="Content-Type" content="text/html;charset=${charset}" />\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>',
-			
-			'html:xs': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">\n' +
-					'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${lang}">\n' +
-					'<head>\n' +
-					'	<meta http-equiv="Content-Type" content="text/html;charset=${charset}" />\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>',
-			
-			'html:xxs': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n' +
-					'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${lang}">\n' +
-					'<head>\n' +
-					'	<meta http-equiv="Content-Type" content="text/html;charset=${charset}" />\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>',
-			
-			'html:5': '<!DOCTYPE HTML>\n' +
-					'<html lang="${locale}">\n' +
-					'<head>\n' +
-					'	<meta charset="${charset}">\n' +
-					'	<title></title>\n' +
-					'</head>\n' +
-					'<body>\n\t${child}|\n</body>\n' +
-					'</html>'
-		},
-		
-		'abbreviations': {
-			'a': '<a href="">',
-			'a:link': '<a href="http://|">',
-			'a:mail': '<a href="mailto:|">',
-			'abbr': '<abbr title="">',
-			'acronym': '<acronym title="">',
-			'base': '<base href="" />',
-			'bdo': '<bdo dir="">',
-			'bdo:r': '<bdo dir="rtl">',
-			'bdo:l': '<bdo dir="ltr">',
-			'link:css': '<link rel="stylesheet" type="text/css" href="${1:style}.css" media="all" />',
-			'link:print': '<link rel="stylesheet" type="text/css" href="|print.css" media="print" />',
-			'link:favicon': '<link rel="shortcut icon" type="image/x-icon" href="|favicon.ico" />',
-			'link:touch': '<link rel="apple-touch-icon" href="|favicon.png" />',
-			'link:rss': '<link rel="alternate" type="application/rss+xml" title="RSS" href="|rss.xml" />',
-			'link:atom': '<link rel="alternate" type="application/atom+xml" title="Atom" href="atom.xml" />',
-			'meta:utf': '<meta http-equiv="Content-Type" content="text/html;charset=UTF-8" />',
-			'meta:win': '<meta http-equiv="Content-Type" content="text/html;charset=windows-1251" />',
-			'meta:compat': '<meta http-equiv="X-UA-Compatible" content="IE=7" />',
-			'style': '<style type="text/css">',
-			'script': '<script type="text/javascript">',
-			'script:src': '<script type="text/javascript" src="">',
-			'img': '<img src="" alt="" />',
-			'iframe': '<iframe src="" frameborder="0">',
-			'embed': '<embed src="" type="" />',
-			'object': '<object data="" type="">',
-			'param': '<param name="" value="" />',
-			'map': '<map name="">',
-			'area': '<area shape="" coords="" href="" alt="" />',
-			'area:d': '<area shape="default" href="" alt="" />',
-			'area:c': '<area shape="circle" coords="" href="" alt="" />',
-			'area:r': '<area shape="rect" coords="" href="" alt="" />',
-			'area:p': '<area shape="poly" coords="" href="" alt="" />',
-			'link': '<link rel="stylesheet" href="" />',
-			'form': '<form action="">',
-			'form:get': '<form action="" method="get">',
-			'form:post': '<form action="" method="post">',
-			'label': '<label for="">',
-			'input': '<input type="" />',
-			'input:hidden': '<input type="hidden" name="" />',
-			'input:h': '<input type="hidden" name="" />',
-			'input:text': '<input type="text" name="" id="" />',
-			'input:t': '<input type="text" name="" id="" />',
-			'input:search': '<input type="search" name="" id="" />',
-			'input:email': '<input type="email" name="" id="" />',
-			'input:url': '<input type="url" name="" id="" />',
-			'input:password': '<input type="password" name="" id="" />',
-			'input:p': '<input type="password" name="" id="" />',
-			'input:datetime': '<input type="datetime" name="" id="" />',
-			'input:date': '<input type="date" name="" id="" />',
-			'input:datetime-local': '<input type="datetime-local" name="" id="" />',
-			'input:month': '<input type="month" name="" id="" />',
-			'input:week': '<input type="week" name="" id="" />',
-			'input:time': '<input type="time" name="" id="" />',
-			'input:number': '<input type="number" name="" id="" />',
-			'input:color': '<input type="color" name="" id="" />',
-			'input:checkbox': '<input type="checkbox" name="" id="" />',
-			'input:c': '<input type="checkbox" name="" id="" />',
-			'input:radio': '<input type="radio" name="" id="" />',
-			'input:r': '<input type="radio" name="" id="" />',
-			'input:range': '<input type="range" name="" id="" />',
-			'input:file': '<input type="file" name="" id="" />',
-			'input:f': '<input type="file" name="" id="" />',
-			'input:submit': '<input type="submit" value="" />',
-			'input:s': '<input type="submit" value="" />',
-			'input:image': '<input type="image" src="" alt="" />',
-			'input:i': '<input type="image" src="" alt="" />',
-			'input:reset': '<input type="reset" value="" />',
-			'input:button': '<input type="button" value="" />',
-			'input:b': '<input type="button" value="" />',
-			'select': '<select name="" id=""></select>',
-			'option': '<option value=""></option>',
-			'textarea': '<textarea name="" id="" cols="30" rows="10">',
-			'menu:context': '<menu type="context">',
-			'menu:c': '<menu type="context">',
-			'menu:toolbar': '<menu type="toolbar">',
-			'menu:t': '<menu type="toolbar">',
-			'video': '<video src="">',
-			'audio': '<audio src="">',
-			'html:xml': '<html xmlns="http://www.w3.org/1999/xhtml">',
-			'bq': '<blockquote>',
-			'acr': '<acronym>',
-			'fig': '<figure>',
-			'ifr': '<iframe>',
-			'emb': '<embed>',
-			'obj': '<object>',
-			'src': '<source>',
-			'cap': '<caption>',
-			'colg': '<colgroup>',
-			'fst': '<fieldset>',
-			'btn': '<button>',
-			'optg': '<optgroup>',
-			'opt': '<option>',
-			'tarea': '<textarea>',
-			'leg': '<legend>',
-			'sect': '<section>',
-			'art': '<article>',
-			'hdr': '<header>',
-			'ftr': '<footer>',
-			'adr': '<address>',
-			'dlg': '<dialog>',
-			'str': '<strong>',
-			'prog': '<progress>',
-			'fset': '<fieldset>',
-			'datag': '<datagrid>',
-			'datal': '<datalist>',
-			'kg': '<keygen>',
-			'out': '<output>',
-			'det': '<details>',
-			'cmd': '<command>',
-			
-			// expandos
-			'ol+': 'ol>li',
-			'ul+': 'ul>li',
-			'dl+': 'dl>dt+dd',
-			'map+': 'map>area',
-			'table+': 'table>tr>td',
-			'colgroup+': 'colgroup>col',
-			'colg+': 'colgroup>col',
-			'tr+': 'tr>td',
-			'select+': 'select>option',
-			'optgroup+': 'optgroup>option',
-			'optg+': 'optgroup>option'
-
-		},
-		
-		'element_types': {
-			'empty': 'area,base,basefont,br,col,frame,hr,img,input,isindex,link,meta,param,embed,keygen,command',
-			'block_level': 'address,applet,blockquote,button,center,dd,del,dir,div,dl,dt,fieldset,form,frameset,hr,iframe,ins,isindex,li,link,map,menu,noframes,noscript,object,ol,p,pre,script,table,tbody,td,tfoot,th,thead,tr,ul,h1,h2,h3,h4,h5,h6',
-			'inline_level': 'a,abbr,acronym,applet,b,basefont,bdo,big,br,button,cite,code,del,dfn,em,font,i,iframe,img,input,ins,kbd,label,map,object,q,s,samp,select,small,span,strike,strong,sub,sup,textarea,tt,u,var'
-		}
-	},
-	
-	'xml': {
-		'extends': 'html',
-		'filters': 'html'
-	},
-	
-	'xsl': {
-		'extends': 'html',
-		'filters': 'html, xsl',
-		'abbreviations': {
-			'tm': '<xsl:template match="" mode="">',
-			'tmatch': 'tm',
-			'tn': '<xsl:template name="">',
-			'tname': 'tn',
-			'xsl:when': '<xsl:when test="">',
-			'wh': 'xsl:when',
-			'var': '<xsl:variable name="">',
-			'vare': '<xsl:variable name="" select=""/>',
-			'if': '<xsl:if test="">',
-			'call': '<xsl:call-template name=""/>',
-			'attr': '<xsl:attribute name="">',
-			'wp': '<xsl:with-param name="" select=""/>',
-			'par': '<xsl:param name="" select=""/>',
-			'val': '<xsl:value-of select=""/>',
-			'co': '<xsl:copy-of select=""/>',
-			'each': '<xsl:for-each select="">',
-			'for': 'each',
-			'ap': '<xsl:apply-templates select="" mode=""/>',
-			
-			//expandos
-			'choose+': 'xsl:choose>xsl:when+xsl:otherwise'
-		}
-	},
-	
-	'haml': {
-		'filters': 'haml',
-		'extends': 'html'
-	}
-};/**
  * Core Zen Coding object, available in global scope
  */
-(function(global) {
+(function(global, _) {
+	var defaultSyntax = 'html';
+	var defaultProfile = 'plain';
+	
+	/** List of registered modules */
+	var modules = {
+		_: _
+	};
+	
+	/**
+	 * Shared empty constructor function to aid in prototype-chain creation.
+	 */
+	var ctor = function(){};
+	
+	/**
+	 * Helper function to correctly set up the prototype chain, for subclasses.
+	 * Similar to `goog.inherits`, but uses a hash of prototype properties and
+	 * class properties to be extended.
+	 * Took it from Backbone.
+	 * @param {Object} parent
+	 * @param {Object} protoProps
+	 * @param {Object} staticProps
+	 * @returns {Object}
+	 */
+	function inherits(parent, protoProps, staticProps) {
+		var child;
+
+		// The constructor function for the new subclass is either defined by
+		// you (the "constructor" property in your `extend` definition), or
+		// defaulted by us to simply call the parent's constructor.
+		if (protoProps && protoProps.hasOwnProperty('constructor')) {
+			child = protoProps.constructor;
+		} else {
+			child = function() {
+				parent.apply(this, arguments);
+			};
+		}
+
+		// Inherit class (static) properties from parent.
+		_.extend(child, parent);
+
+		// Set the prototype chain to inherit from `parent`, without calling
+		// `parent`'s constructor function.
+		ctor.prototype = parent.prototype;
+		child.prototype = new ctor();
+
+		// Add prototype properties (instance properties) to the subclass,
+		// if supplied.
+		if (protoProps)
+			_.extend(child.prototype, protoProps);
+
+		// Add static properties to the constructor function, if supplied.
+		if (staticProps)
+			_.extend(child, staticProps);
+
+		// Correctly set child's `prototype.constructor`.
+		child.prototype.constructor = child;
+
+		// Set a convenience property in case the parent's prototype is needed
+		// later.
+		child.__super__ = parent.prototype;
+
+		return child;
+	};
+	
+	/**
+	 * @type Function Function that loads module definition if it's not defined
+	 */
+	var moduleLoader = null;
 	
 	global.zen_coding = {
 		/**
 		 * Simple, AMD-like module definition. The module will be added into
-		 * <code>zen_coding</code> object and will be available via 
+		 * <code>zen_coding</code> object and will be available via
 		 * <code>zen_coding.require(name)</code> or <code>zen_coding[name]</code>
 		 * @param {String} name
 		 * @param {Function} factory
@@ -1737,9 +1141,9 @@ var zen_settings = {
 		 */
 		define: function(name, factory) {
 			// do not let redefine existing properties
-			if (!(name in this)) {
-				this[name] = _.isFunction(factory) 
-					? factory(_.bind(this.require, this), _, this)
+			if (!(name in modules)) {
+				modules[name] = _.isFunction(factory) 
+					? this.exec(factory)
 					: factory;
 			}
 		},
@@ -1749,7 +1153,33 @@ var zen_settings = {
 		 * @param {String} name Module name
 		 */
 		require: function(name) {
-			return this[name];
+			if (!(name in modules) && moduleLoader)
+				moduleLoader(name);
+			
+			return modules[name];
+		},
+		
+		/**
+		 * Helper method that just executes passed function but with all 
+		 * important arguments like 'require' and '_'
+		 * @param {Function} fn
+		 * @param {Object} context Execution context
+		 */
+		exec: function(fn, context) {
+			return fn.call(context || global, _.bind(this.require, this), _, this);
+		},
+		
+		/**
+		 * The self-propagating extend function for classes.
+		 * Took it from Backbone 
+		 * @param {Object} protoProps
+		 * @param {Object} classProps
+		 * @returns {Object}
+		 */
+		extend: function(protoProps, classProps) {
+			var child = inherits(this, protoProps, classProps);
+			child.extend = this.extend;
+			return child;
 		},
 		
 		/**
@@ -1764,16 +1194,36 @@ var zen_settings = {
 		expandAbbreviation: function(abbr, syntax, profile, contextNode) {
 			if (!abbr) return '';
 			
+			syntax = syntax || defaultSyntax;
+			profile = profile || defaultProfile;
+			
 			var filters = this.require('filters');
 			var utils = this.require('utils');
 			var transform = this.require('transform');
-			var parser = this.require('parser');
+			
+			profile = this.require('profile').get(profile, syntax);
 			
 			var data = filters.extractFromAbbreviation(abbr);
 			var outputTree = transform.transform(data[0], syntax, contextNode);
 			var filtersList = filters.composeList(syntax, profile, data[1]);
 			filters.apply(outputTree, filtersList, profile);
 			return utils.replaceVariables(outputTree.toString());
+		},
+		
+		/**
+		 * Returns default syntax name used in abbreviation engine
+		 * @returns {String}
+		 */
+		defaultSyntax: function() {
+			return defaultSyntax;
+		},
+		
+		/**
+		 * Returns default profile name used in abbreviation engine
+		 * @returns {String}
+		 */
+		defaultProfile: function() {
+			return defaultProfile;
 		},
 		
 		/**
@@ -1785,14 +1235,14 @@ var zen_settings = {
 		},
 		
 		/**
-		 * Reference to Underscore.js. 
-		 * Get it by calling <code>zen_coding.require('_')</code>
+		 * Setups function that should synchronously load undefined modules
+		 * @param {Function} fn
 		 */
-		_: _
+		setModuleLoader: function(fn) {
+			moduleLoader = fn;
+		}
 	};
-	
-	
-})(this);/**
+})(this, _);/**
  * Utility module for Zen Coding
  * @param {Function} require
  * @param {Underscore} _
@@ -1804,8 +1254,45 @@ zen_coding.define('utils', function(require, _) {
 	 */
 	var caretPlaceholder = '{%::zen-caret::%}';
 	
+	/**
+	 * A simple string builder, optimized for faster text concatenation
+	 * @param {String} value Initial value
+	 */
+	function StringBuilder(value) {
+		this._data = [];
+		this.length = 0;
+		
+		if (value)
+			this.append(value);
+	}
+	
+	StringBuilder.prototype = {
+		/**
+		 * Append string
+		 * @param {String} text
+		 */
+		append: function(text) {
+			this._data.push(text);
+			this.length += text.length;
+		},
+		
+		/**
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this._data.join('');
+		},
+		
+		/**
+		 * @returns {String}
+		 */
+		valueOf: function() {
+			return this.toString();
+		}
+	};
+	
 	return {
-		/** @memberOf zen_coding.utils */
+		/** @memberOf utils */
 		reTag: /<\/?[\w:\-]+(?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*\s*(\/?)>$/,
 		
 		/**
@@ -1816,22 +1303,6 @@ zen_coding.define('utils', function(require, _) {
 		 */
 		endsWithTag: function(str) {
 			return this.reTag.test(str);
-		},
-		
-		/**
-		 * Check if passed symbol is valid symbol for abbreviation expression
-		 * @param {String} ch
-		 * @return {Boolean}
-		 */
-		isAllowedChar: function(ch) {
-			ch = String(ch); // convert Java object to JS
-			var charCode = ch.charCodeAt(0);
-			var specialChars = '#.>+*:$-_!@[]()|';
-			
-			return (charCode > 64 && charCode < 91)       // uppercase letter
-					|| (charCode > 96 && charCode < 123)  // lowercase letter
-					|| this.isNumeric(ch)                 // number
-					|| specialChars.indexOf(ch) != -1;    // special character
 		},
 		
 		/**
@@ -1860,7 +1331,7 @@ zen_coding.define('utils', function(require, _) {
 		 * @returns {String}
 		 */
 		getNewline: function() {
-			var nl = zen_coding.require('resources').getVariable('newline');
+			var nl = require('resources').getVariable('newline');
 			return _.isString(nl) ? nl : '\n';
 		},
 		
@@ -1869,7 +1340,7 @@ zen_coding.define('utils', function(require, _) {
 		 * @param {String} str
 		 */
 		setNewline: function(str) {
-			var res = zen_coding.require('resources');
+			var res = require('resources');
 			res.setVariable('newline', str);
 			res.setVariable('nl', str);
 		},
@@ -1904,6 +1375,16 @@ zen_coding.define('utils', function(require, _) {
 		},
 		
 		/**
+		 * Normalizes newline character: replaces newlines in <code>text</code> 
+		 * with newline defined in preferences
+		 * @param {String} text
+		 * @returns {String}
+		 */
+		normalizeNewline: function(text) {
+			return this.splitByLines(text).join(this.getNewline());
+		},
+		
+		/**
 		 * Repeats string <code>howMany</code> times
 		 * @param {String} str
 		 * @param {Number} how_many
@@ -1926,7 +1407,7 @@ zen_coding.define('utils', function(require, _) {
 		 */
 		padString: function(text, pad) {
 			var padStr = (_.isNumber(pad)) 
-				? this.repeatString(zen_resources.getVariable('indentation') || '\t', pad) 
+				? this.repeatString(require('resources').getVariable('indentation') || '\t', pad) 
 				: pad;
 				
 			var result = [];
@@ -2034,18 +1515,17 @@ zen_coding.define('utils', function(require, _) {
 				return p1 in vars ? vars[p1] : null;
 			};
 			
-			return str.replace(/\$\{([\w\-]+)\}/g, function(str, p1) {
+			var res = require('resources');
+			return str.replace(/\$\{([a-z_\-][\w\-]*)\}/g, function(str, p1) {
 				var newValue = resolver(str, p1);
 				if (newValue === null) {
 					// try to find variable in zen_settings
-					var res = require('resources');
 					newValue = res.getVariable(p1);
 				}
 				
 				if (newValue === null || _.isUndefined(newValue))
 					// nothing found, return token itself
 					newValue = str;
-				
 				return newValue;
 			});
 		},
@@ -2088,12 +1568,12 @@ zen_coding.define('utils', function(require, _) {
 		/**
 		 * Escapes special characters used in Zen Coding, like '$', '|', etc.
 		 * Use this method before passing to actions like "Wrap with Abbreviation"
-		 * to make sure that existing spacial characters won't be altered
+		 * to make sure that existing special characters won't be altered
 		 * @param {String} text
 		 * @return {String}
 		 */
 		escapeText: function(text) {
-			return text.replace(/([\$\|\\])/g, '\\$1');
+			return text.replace(/([\$\\])/g, '\\$1');
 		},
 		
 		/**
@@ -2125,24 +1605,6 @@ zen_coding.define('utils', function(require, _) {
 		},
 		
 		/**
-		 * Returns context-aware node counter
-		 * @param {node} ZenNode
-		 * @return {Number}
-		 */
-		getCounterForNode: function(node) {
-			// find nearest repeating parent
-			var counter = node.counter;
-			if (!node.is_repeating && !node.repeat_by_lines) {
-				while (node = node.parent) {
-					if (node.is_repeating || node.repeat_by_lines)
-						return node.counter;
-				}
-			}
-			
-			return counter;
-		},
-		
-		/**
 		 * Returns line padding
 		 * @param {String} line
 		 * @return {String}
@@ -2171,16 +1633,711 @@ zen_coding.define('utils', function(require, _) {
 		 */
 		prettifyNumber: function(num, fraction) {
 			return num.toFixed(typeof fraction == 'undefined' ? 2 : fraction).replace(/\.?0+$/, '');
+		},
+		
+		/**
+		 * A simple mutable string shim, optimized for faster text concatenation
+		 * @param {String} value Initial value
+		 * @returns {StringBuilder}
+		 */
+		stringBuilder: function(value) {
+			return new StringBuilder(value);
+		},
+		
+		/**
+		 * Replace substring of <code>str</code> with <code>value</code>
+		 * @param {String} str String where to replace substring
+		 * @param {String} value New substring value
+		 * @param {Number} start Start index of substring to replace. May also
+		 * be a <code>Range</code> object: in this case, the <code>end</code>
+		 * argument is not required
+		 * @param {Number} end End index of substring to replace. If ommited, 
+		 * <code>start</code> argument is used
+		 */
+		replaceSubstring: function(str, value, start, end) {
+			if (_.isObject(start) && 'end' in start) {
+				end = start.end;
+				start = start.start;
+			}
+			
+			if (_.isUndefined(end))
+				end = start;
+			
+			return str.substring(0, start) + value + str.substring(end);
+		},
+		
+		/**
+		 * Narrows down text range, adjusting selection to non-space characters
+		 * @param {String} text
+		 * @param {Number} start Starting range in <code>text</code> where 
+		 * slection should be adjusted. Can also be any object that is accepted
+		 * by <code>Range</code> class
+		 * @return {Range}
+		 */
+		narrowToNonSpace: function(text, start, end) {
+			var range = require('range').create(start, end);
+			
+			var reSpace = /[\s\n\r\u00a0]/;
+			// narrow down selection until first non-space character
+			while (range.start < range.end) {
+				if (!reSpace.test(text.charAt(range.start)))
+					break;
+					
+				range.start++;
+			}
+			
+			while (range.end > range.start) {
+				range.end--;
+				if (!reSpace.test(text.charAt(range.end))) {
+					range.end++;
+					break;
+				}
+			}
+			
+			return range;
+		},
+		
+		/**
+		 * Find start and end index of text line for <code>from</code> index
+		 * @param {String} text 
+		 * @param {Number} from
+		 */
+		findNewlineBounds: function(text, from) {
+			var len = text.length,
+				start = 0,
+				end = len - 1;
+			
+			// search left
+			for (var i = from - 1; i > 0; i--) {
+				var ch = text.charAt(i);
+				if (ch == '\n' || ch == '\r') {
+					start = i + 1;
+					break;
+				}
+			}
+			// search right
+			for (var j = from; j < len; j++) {
+				var ch = text.charAt(j);
+				if (ch == '\n' || ch == '\r') {
+					end = j;
+					break;
+				}
+			}
+			
+			return require('range').create(start, end - start);
+		},
+
+		/**
+		 * Deep merge of two or more objects. Taken from jQuery.extend()
+		 */
+		deepMerge: function() {
+			var options, name, src, copy, copyIsArray, clone,
+				target = arguments[0] || {},
+				i = 1,
+				length = arguments.length;
+
+
+			// Handle case when target is a string or something (possible in deep copy)
+			if (!_.isObject(target) && !_.isFunction(target)) {
+				target = {};
+			}
+
+			for ( ; i < length; i++ ) {
+				// Only deal with non-null/undefined values
+				if ( (options = arguments[ i ]) != null ) {
+					// Extend the base object
+					for ( name in options ) {
+						src = target[ name ];
+						copy = options[ name ];
+
+						// Prevent never-ending loop
+						if ( target === copy ) {
+							continue;
+						}
+
+						// Recurse if we're merging plain objects or arrays
+						if ( copy && ( _.isObject(copy) || (copyIsArray = _.isArray(copy)) ) ) {
+							if ( copyIsArray ) {
+								copyIsArray = false;
+								clone = src && _.isArray(src) ? src : [];
+
+							} else {
+								clone = src && _.isObject(src) ? src : {};
+							}
+
+							// Never move original objects, clone them
+							target[ name ] = this.deepMerge(clone, copy );
+
+						// Don't bring in undefined values
+						} else if ( copy !== undefined ) {
+							target[ name ] = copy;
+						}
+					}
+				}
+			}
+
+			// Return the modified object
+			return target;
 		}
 	};
 });
 /**
+ * Helper module to work with ranges
+ * @constructor
+ * @memberOf __rangeDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('range', function(require, _) {
+	/**
+	 * @type Range
+	 * @constructor
+	 * @param {Object} start
+	 * @param {Number} len
+	 */
+	function Range(start, len) {
+		if (_.isObject(start) && 'start' in start) {
+			// create range from object stub
+			this.start = Math.min(start.start, start.end);
+			this.end = Math.max(start.start, start.end);
+		} else if (_.isArray(start)) {
+			this.start = start[0];
+			this.end = start[1];
+		} else {
+			len = _.isString(len) ? len.length : +len;
+			this.start = start;
+			this.end = start + len;
+		}
+	}
+	
+	Range.prototype = {
+		length: function() {
+			return Math.abs(this.end - this.start);
+		},
+		
+		/**
+		 * Returns <code>true</code> if passed range is equals to current one
+		 * @param {Range} range
+		 * @returns {Boolean}
+		 */
+		equal: function(range) {
+			return this.start === range.start && this.end === range.end;
+		},
+		
+		/**
+		 * Shifts indexes position with passed <code>delat</code>
+		 * @param {Number} delta
+		 * @returns {Range} range itself
+		 */
+		shift: function(delta) {
+			this.start += delta;
+			this.end += delta;
+			return this;
+		},
+		
+		/**
+		 * Check if two ranges are overlapped
+		 * @param {Range} range
+		 * @returns {Boolean}
+		 */
+		overlap: function(range) {
+			return range.start <= this.end && range.end >= this.start;
+		},
+		
+		/**
+		 * Finds intersection of two ranges
+		 * @param {Range} range
+		 * @returns {Range} <code>null</code> if ranges does not overlap
+		 */
+		intersection: function(range) {
+			if (this.overlap(range)) {
+				var start = Math.max(range.start, this.start);
+				var end = Math.min(range.end, this.end);
+				return new Range(start, end - start);
+			}
+			
+			return null;
+		},
+		
+		/**
+		 * Returns the union of the thow ranges.
+		 * @param {Range} range
+		 * @returns {Range} <code>null</code> if ranges are not overlapped
+		 */
+		union: function(range) {
+			if (this.overlap(range)) {
+				var start = Math.min(range.start, this.start);
+				var end = Math.max(range.end, this.end);
+				return new Range(start, end - start);
+			}
+			
+			return null;
+		},
+		
+		/**
+		 * Returns a Boolean value that indicates whether a specified position 
+		 * is in a given range.
+		 * @param {Number} loc
+		 */
+		inside: function(loc) {
+			return this.start <= loc && this.end > loc;
+		},
+		
+		/**
+		 * Check if current range completely includes specified one
+		 * @param {Range} r
+		 * @returns {Boolean} 
+		 */
+		include: function(r) {
+			return this.start <= r.start && this.end >= r.end;
+		},
+		
+		/**
+		 * Returns substring of specified <code>str</code> for current range
+		 * @param {String} str
+		 * @returns {String}
+		 */
+		substring: function(str) {
+			return this.length() > 0 
+				? str.substring(this.start, this.end) 
+				: '';
+		},
+		
+		/**
+		 * Creates copy of current range
+		 * @returns {Range}
+		 */
+		clone: function() {
+			return new Range(this.start, this.length());
+		},
+		
+		/**
+		 * @returns {Array}
+		 */
+		toArray: function() {
+			return [this.start, this.end];
+		},
+		
+		toString: function() {
+			return '{' + this.start + ', ' + this.length() + '}';
+		}
+	};
+	
+	return {
+		/**
+		 * Creates new range object instance
+		 * @param {Object} start Range start or array with 'start' and 'end'
+		 * as two first indexes or object with 'start' and 'end' properties
+		 * @param {Number} len Range length or string to produce range from
+		 * @returns {Range}
+		 * @memberOf zen_coding.range
+		 */
+		create: function(start, len) {
+			if (_.isUndefined(start) || start === null)
+				return null;
+			
+			if (start instanceof Range)
+				return start;
+				
+			return new Range(start, len);
+		},
+		
+		/**
+		 * <code>Range</code> object factory, the same as <code>this.create()</code>
+		 * but last argument represents end of range, not length
+		 * @returns {Range}
+		 */
+		create2: function(start, end) {
+			if (_.isNumber(start) && _.isNumber(end)) {
+				end -= start;
+			}
+			
+			return this.create(start, end);
+		}
+	};
+});/**
+ * Utility module that provides ordered storage of function handlers. 
+ * Many Zen Coding module's functionality can be extended/overridden by custom
+ * function. This modules provides unified storage of handler functions, their 
+ * management and execution
+ * 
+ * @constructor
+ * @memberOf __handlerListDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('handlerList', function(require, _) {
+	/**
+	 * @type HandlerList
+	 * @constructor
+	 */
+	function HandlerList() {
+		this._list = [];
+	}
+	
+	HandlerList.prototype = {
+		/**
+		 * Adds function handler
+		 * @param {Function} fn Handler
+		 * @param {Object} options Handler options. Possible values are:<br><br>
+		 * <b>order</b> : (<code>Number</code>) – order in handler list. Handlers
+		 * with higher order value will be executed earlier.
+		 */
+		add: function(fn, options) {
+			this._list.push(_.extend({order: 0}, options || {}, {fn: fn}));
+		},
+		
+		/**
+		 * Removes handler from list
+		 * @param {Function} fn
+		 */
+		remove: function(fn) {
+			this._list = _.without(this._list, _.find(this._list, function(item) {
+				return item.fn === fn;
+			}));
+		},
+		
+		/**
+		 * Returns ordered list of handlers. By default, handlers 
+		 * with the same <code>order</code> option returned in reverse order, 
+		 * i.e. the latter function was added into the handlers list, the higher 
+		 * it will be in the returned array 
+		 * @returns {Array}
+		 */
+		list: function() {
+			return _.sortBy(this._list, 'order').reverse();
+		},
+		
+		/**
+		 * Returns ordered list of handler functions
+		 * @returns {Array}
+		 */
+		listFn: function() {
+			return _.pluck(this.list(), 'fn');
+		},
+		
+		/**
+		 * Executes handler functions in their designated order. If function
+		 * returns <code>skipVal</code>, meaning that function was unable to 
+		 * handle passed <code>args</code>, the next function will be executed
+		 * and so on.
+		 * @param {Object} skipValue If function returns this value, execute 
+		 * next handler.
+		 * @param {Array} args Arguments to pass to handler function
+		 * @returns {Boolean} Whether any of registered handlers performed
+		 * successfully  
+		 */
+		exec: function(skipValue, args) {
+			args = args || [];
+			var result = null;
+			_.find(this.list(), function(h) {
+				result = h.fn.apply(h, args);
+				if (result !== skipValue)
+					return true;
+			});
+			
+			return result;
+		}
+	};
+	
+	return {
+		/**
+		 * Factory method that produces <code>HandlerList</code> instance
+		 * @returns {HandlerList}
+		 * @memberOf handlerList
+		 */
+		create: function() {
+			return new HandlerList();
+		}
+	};
+});/**
+ * Helper class for convenient token iteration
+ */
+zen_coding.define('tokenIterator', function(require, _) {
+	/**
+	 * @type TokenIterator
+	 * @param {Array} tokens
+	 * @type TokenIterator
+	 * @constructor
+	 */
+	function TokenIterator(tokens) {
+		/** @type Array */
+		this.tokens = tokens;
+		this._position = 0;
+		this.reset();
+	}
+	
+	TokenIterator.prototype = {
+		next: function() {
+			if (this.hasNext()) {
+				var token = this.tokens[++this._i];
+				this._position = token.start;
+				return token;
+			}
+			
+			return null;
+		},
+		
+		current: function() {
+			return this.tokens[this._i];
+		},
+		
+		position: function() {
+			return this._position;
+		},
+		
+		hasNext: function() {
+			return this._i < this._il - 1;
+		},
+		
+		reset: function() {
+			this._i = -1;
+			this._il = this.tokens.length;
+		},
+		
+		item: function() {
+			return this.tokens[this._i];
+		},
+		
+		itemNext: function() {
+			return this.tokens[this._i + 1];
+		},
+		
+		itemPrev: function() {
+			return this.tokens[this._i - 1];
+		},
+		
+		nextUntil: function(type, callback) {
+			var token;
+			var test = _.isString(type) 
+				? function(t){return t.type == type;} 
+				: type;
+			
+			while (token = this.next()) {
+				if (callback)
+					callback.call(this, token);
+				if (test.call(this, token))
+					break;
+			}
+		}
+	};
+	
+	return {
+		create: function(tokens) {
+			return new TokenIterator(tokens);
+		}
+	};
+});/**
+ * A trimmed version of CodeMirror's StringStream module for string parsing
+ */
+zen_coding.define('stringStream', function(require, _) {
+	/**
+	 * @type StringStream
+	 * @constructor
+	 * @param {String} string
+	 */
+	function StringStream(string) {
+		this.pos = this.start = 0;
+		this.string = string;
+	}
+	
+	StringStream.prototype = {
+		/**
+		 * Returns true only if the stream is at the end of the line.
+		 * @returns {Boolean}
+		 */
+		eol: function() {
+			return this.pos >= this.string.length;
+		},
+		
+		/**
+		 * Returns true only if the stream is at the start of the line
+		 * @returns {Boolean}
+		 */
+		sol: function() {
+			return this.pos == 0;
+		},
+		
+		/**
+		 * Returns the next character in the stream without advancing it. 
+		 * Will return <code>undefined</code> at the end of the line.
+		 * @returns {String}
+		 */
+		peek: function() {
+			return this.string.charAt(this.pos);
+		},
+		
+		/**
+		 * Returns the next character in the stream and advances it.
+		 * Also returns <code>undefined</code> when no more characters are available.
+		 * @returns {String}
+		 */
+		next: function() {
+			if (this.pos < this.string.length)
+				return this.string.charAt(this.pos++);
+		},
+		
+		/**
+		 * match can be a character, a regular expression, or a function that
+		 * takes a character and returns a boolean. If the next character in the
+		 * stream 'matches' the given argument, it is consumed and returned.
+		 * Otherwise, undefined is returned.
+		 * @param {Object} match
+		 * @returns {String}
+		 */
+		eat: function(match) {
+			var ch = this.string.charAt(this.pos), ok;
+			if (typeof match == "string")
+				ok = ch == match;
+			else
+				ok = ch && (match.test ? match.test(ch) : match(ch));
+			
+			if (ok) {
+				++this.pos;
+				return ch;
+			}
+		},
+		
+		/**
+		 * Repeatedly calls <code>eat</code> with the given argument, until it
+		 * fails. Returns <code>true</code> if any characters were eaten.
+		 * @param {Object} match
+		 * @returns {Boolean}
+		 */
+		eatWhile: function(match) {
+			var start = this.pos;
+			while (this.eat(match)) {}
+			return this.pos > start;
+		},
+		
+		/**
+		 * Shortcut for <code>eatWhile</code> when matching white-space.
+		 * @returns {Boolean}
+		 */
+		eatSpace: function() {
+			var start = this.pos;
+			while (/[\s\u00a0]/.test(this.string.charAt(this.pos)))
+				++this.pos;
+			return this.pos > start;
+		},
+		
+		/**
+		 * Moves the position to the end of the line.
+		 */
+		skipToEnd: function() {
+			this.pos = this.string.length;
+		},
+		
+		/**
+		 * Skips to the next occurrence of the given character, if found on the
+		 * current line (doesn't advance the stream if the character does not
+		 * occur on the line). Returns true if the character was found.
+		 * @param {String} ch
+		 * @returns {Boolean}
+		 */
+		skipTo: function(ch) {
+			var found = this.string.indexOf(ch, this.pos);
+			if (found > -1) {
+				this.pos = found;
+				return true;
+			}
+		},
+		
+		/**
+		 * Skips to <code>close</code> character which is pair to <code>open</code>
+		 * character, considering possible pair nesting. This function is used
+		 * to consume pair of characters, like opening and closing braces
+		 * @param {String} open
+		 * @param {String} close
+		 * @returns {Boolean} Returns <code>true</code> if pair was successfully
+		 * consumed
+		 */
+		skipToPair: function(open, close) {
+			var braceCount = 0, ch;
+			var pos = this.pos, len = this.string.length;
+			while (pos < len) {
+				ch = this.string.charAt(pos++);
+				if (ch == open) {
+					braceCount++;
+				} else if (ch == close) {
+					braceCount--;
+					if (braceCount < 1) {
+						this.pos = pos;
+						return true;
+					}
+				}
+			}
+			
+			return false;
+		},
+		
+		/**
+		 * Backs up the stream n characters. Backing it up further than the
+		 * start of the current token will cause things to break, so be careful.
+		 * @param {Number} n
+		 */
+		backUp : function(n) {
+			this.pos -= n;
+		},
+		
+		/**
+		 * Act like a multi-character <code>eat</code>—if <code>consume</code> is true or
+		 * not given—or a look-ahead that doesn't update the stream position—if
+		 * it is false. <code>pattern</code> can be either a string or a
+		 * regular expression starting with ^. When it is a string,
+		 * <code>caseInsensitive</code> can be set to true to make the match
+		 * case-insensitive. When successfully matching a regular expression,
+		 * the returned value will be the array returned by <code>match</code>,
+		 * in case you need to extract matched groups.
+		 * 
+		 * @param {RegExp} pattern
+		 * @param {Boolean} consume
+		 * @param {Boolean} caseInsensitive
+		 * @returns
+		 */
+		match: function(pattern, consume, caseInsensitive) {
+			if (typeof pattern == "string") {
+				var cased = caseInsensitive
+					? function(str) {return str.toLowerCase();}
+					: function(str) {return str;};
+				
+				if (cased(this.string).indexOf(cased(pattern), this.pos) == this.pos) {
+					if (consume !== false)
+						this.pos += pattern.length;
+					return true;
+				}
+			} else {
+				var match = this.string.slice(this.pos).match(pattern);
+				if (match && consume !== false)
+					this.pos += match[0].length;
+				return match;
+			}
+		},
+		
+		/**
+		 * Get the string between the start of the current token and the 
+		 * current stream position.
+		 * @returns {String}
+		 */
+		current: function() {
+			return this.string.slice(this.start, this.pos);
+		}
+	};
+	
+	return {
+		create: function(string) {
+			return new StringStream(string);
+		}
+	};
+});/**
  * Parsed resources (snippets, abbreviations, variables, etc.) for Zen Coding.
  * Contains convenient method to get access for snippets with respect of 
  * inheritance. Also provides ability to store data in different vocabularies
  * ('system' and 'user') for fast and safe resource update
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
+ * 
+ * XXX This module is over-complicated, should provide better implementation
  * 
  * @param {Function} require
  * @param {Underscore} _
@@ -2190,13 +2347,13 @@ zen_coding.define('resources', function(require, _) {
 	var VOC_USER = 'user';
 		
 	/** Regular expression for XML tag matching */
-	var re_tag = /^<(\w+\:?[\w\-]*)((?:\s+[\w\:\-]+\s*=\s*(['"]).*?\3)*)\s*(\/?)>/;
+	var reTag = /^<(\w+\:?[\w\-]*)((?:\s+[\w\:\-]+\s*=\s*(['"]).*?\3)*)\s*(\/?)>/;
 		
 	var systemSettings = {};
 	var userSettings = {};
 	
-	/** List of registered abbreviation resolvers */
-	var resolvers = [];
+	/** @type HandlerList List of registered abbreviation resolvers */
+	var resolvers = require('handlerList').create();
 	
 	/**
 	 * Check if specified resource is parsed by Zen Coding
@@ -2304,7 +2461,7 @@ zen_coding.define('resources', function(require, _) {
 	 * @param {String} syntax Syntax name
 	 * @param {String} name Resource name ('abbreviation', 'snippet')
 	 * @param {String} item Abbreviation or snippet name
-	 * @return {Object|null}
+	 * @return {Object}
 	 */
 	function getParsedItem(vocabulary, syntax, name, item) {
 		var chain = createResourceChain(vocabulary, syntax, name);
@@ -2347,7 +2504,7 @@ zen_coding.define('resources', function(require, _) {
 		key = require('utils').trim(key);
 		var elements = require('elements');
 		var m;
-		if (m = re_tag.exec(value)) {
+		if (m = reTag.exec(value)) {
 			return elements.create('element', m[1], m[2], m[4] == '/');
 		} else {
 			// assume it's reference to another abbreviation
@@ -2380,7 +2537,7 @@ zen_coding.define('resources', function(require, _) {
 		 * Returns resource value from data set with respect of inheritance
 		 * @param {String} syntax Resource syntax (html, css, ...)
 		 * @param {String} name Resource name ('snippets' or 'abbreviation')
-		 * @param {String} abbr Abbreviation name
+		 * @param {String} item Resource item name
 		 * @return {Object}
 		 */
 		getResource: function(syntax, name, item) {
@@ -2404,7 +2561,7 @@ zen_coding.define('resources', function(require, _) {
 		 * Returns snippet value from data set
 		 * @param {String} type Resource type (html, css, ...)
 		 * @param {String} name Snippet name
-		 * @return {Object|null}
+		 * @return {Object}
 		 */
 		getSnippet: function(type, name) {
 			name = name || '';
@@ -2420,15 +2577,9 @@ zen_coding.define('resources', function(require, _) {
 		 * @returns {Object}
 		 */
 		getMatchedResource: function(node, syntax) {
-			// walk through registered resolvers
-			var result = null;
-			for (var i = 0, il = resolvers.length; i < il; i++) {
-				result = resolvers[i].call(this, node, syntax);
-				if (result !== null)
-					return result;
-			}
-			
-			return this.getAbbreviation(syntax, node.name) || this.getSnippet(syntax, node.name);
+			return resolvers.exec(null, _.toArray(arguments)) 
+				|| this.getAbbreviation(syntax, node.name) 
+				|| this.getSnippet(syntax, node.name);
 		},
 		
 		/**
@@ -2466,41 +2617,6 @@ zen_coding.define('resources', function(require, _) {
 		},
 		
 		/**
-		 * Check if specified item exists in specified resource collection
-		 * (like 'empty', 'block_level')
-		 * @param {String} syntax 
-		 * @param {String} collection Collection name
-		 * @param {String} item Item name
-		 */
-		isItemInCollection: function(syntax, collection, item) {
-			return item in this.getElementsCollection(getVocabulary(VOC_USER)[syntax], collection)
-				|| item in this.getElementsCollection(getVocabulary(VOC_SYSTEM)[syntax], collection);
-		},
-		
-		/**
-		 * Returns specified elements collection (like 'empty', 'block_level') from
-		 * <code>resource</code>. If collections wasn't found, returns empty object
-		 * @param {Object} resource
-		 * @param {String} type
-		 * @return {Object}
-		 */
-		getElementsCollection: function(resource, type) {
-			if (resource && resource.element_types) {
-				// if it's not parsed yet – do it
-				var res = resource.element_types;
-				if (!isParsed(res)) {
-					for (var p in res) 
-						res[p] = stringToHash(res[p]);
-						
-					setParsed(res);
-				}
-				return res[type] || {};
-			}
-			else
-				return {};
-		},
-		
-		/**
 		 * Check if there are resources for specified syntax
 		 * @param {String} syntax
 		 * @return {Boolean}
@@ -2516,23 +2632,18 @@ zen_coding.define('resources', function(require, _) {
 		 * abbreviation as first argument and should return parsed abbreviation
 		 * object if abbreviation has handled successfully, <code>null</code>
 		 * otherwise
+		 * @param {Object} options Options list as described in 
+		 * {@link HandlerList#add()} method
 		 */
-		addResolver: function(fn) {
-			if (!_.include(resolvers, fn))
-				resolvers.unshift(fn);
+		addResolver: function(fn, options) {
+			resolvers.add(fn, options);
 		},
 		
 		removeResolver: function(fn) {
-			resolvers = _.without(resolvers, fn);
+			resolvers.remove(fn);
 		}
 	};
-});
-
-try {
-	var res = zen_coding.require('resources');
-	res.setVocabulary(zen_settings, 'system');
-	res.setVocabulary(my_zen_settings, 'user');
-} catch(e) {}/**
+});/**
  * Module describes and performs Zen Coding actions. The actions themselves are
  * defined in <i>actions</i> folder
  * @param {Function} require
@@ -2541,20 +2652,37 @@ try {
 zen_coding.define('actions', function(require, _, zc) {
 	var actions = {};
 	
+	/**
+	 * “Humanizes” action name, makes it more readable for people
+	 * @param {String} name Action name (like 'expand_abbreviation')
+	 * @return Humanized name (like 'Expand Abbreviation')
+	 */
+	function humanizeActionName(name) {
+		return require('utils').trim(name.charAt(0).toUpperCase() 
+			+ name.substring(1).replace(/_[a-z]/g, function(str) {
+				return ' ' + str.charAt(1).toUpperCase();
+			}));
+	}
+	
 	return {
 		/**
 		 * Registers new action
 		 * @param {String} name Action name
 		 * @param {Function} fn Action function
-		 * @param {String} label Action label. May be used to build menus
-		 * @memberOf zen_coding.actions
+		 * @param {Object} options Custom action options:<br>
+		 * <b>label</b> : (<code>String</code>) – Human-readable action name. 
+		 * May contain '/' symbols as submenu separators<br>
+		 * <b>hidden</b> : (<code>Boolean</code>) – Indicates whether action
+		 * should be displayed in menu (<code>getMenu()</code> method)
+		 * 
+		 * @memberOf actions
 		 */
-		add: function(name, fn, label) {
+		add: function(name, fn, options) {
 			name = name.toLowerCase();
 			actions[name] = {
 				name: name,
 				fn: fn,
-				label: label
+				options: options || {}
 			};
 		},
 		
@@ -2607,6 +2735,77 @@ zen_coding.define('actions', function(require, _, zc) {
 		 */
 		getList: function() {
 			return _.values(this.getAll());
+		},
+		
+		/**
+		 * Returns actions list as structured menu. If action has <i>label</i>,
+		 * it will be splitted by '/' symbol into submenus (for example: 
+		 * CSS/Reflect Value) and grouped with other items
+		 * @param {Array} skipActions List of action identifiers that should be 
+		 * skipped from menu
+		 * @returns {Array}
+		 */
+		getMenu: function(skipActions) {
+			var result = [];
+			skipActions = skipActions || [];
+			_.each(this.getList(), function(action) {
+				if (action.options.hidden || _.include(skipActions, action.name))
+					return;
+				
+				var actionName = humanizeActionName(action.name);
+				var ctx = result;
+				if (action.options.label) {
+					var parts = action.options.label.split('/');
+					actionName = parts.pop();
+					
+					// create submenus, if needed
+					var menuName, submenu;
+					while (menuName = parts.shift()) {
+						submenu = _.find(ctx, function(item) {
+							return item.type == 'submenu' && item.name == menuName;
+						});
+						
+						if (!submenu) {
+							submenu = {
+								name: menuName,
+								type: 'submenu',
+								items: []
+							};
+							ctx.push(submenu);
+						}
+						
+						ctx = submenu.items;
+					}
+				}
+				
+				ctx.push({
+					type: 'action',
+					name: action.name,
+					label: actionName
+				});
+			});
+			
+			return result;
+		},
+
+		/**
+		 * Returns action name associated with menu item title
+		 * @param {String} title
+		 * @returns {String}
+		 */
+		getActionNameForMenuTitle: function(title, menu) {
+			var item = null;
+			_.find(menu || this.getMenu(), function(val) {
+				if (val.type == 'action') {
+					if (val.label == title || val.name == title) {
+						return item = val.name;
+					}
+				} else {
+					return item = this.getActionNameForMenuTitle(title, val.items);
+				}
+			}, this);
+			
+			return item || null;
 		}
 	};
 });/**
@@ -2666,20 +2865,35 @@ zen_coding.define('profile', function(require, _) {
 		 * @returns {Object} New profile
 		 */
 		create: function(name, options) {
-			return createProfile(name, options);
+			if (arguments.length == 2)
+				return createProfile(name, options);
+			else
+				// create profile object only
+				return _.defaults(name || {}, defaultProfile);
 		},
 		
 		/**
 		 * Returns profile by its name. If profile wasn't found, returns
 		 * 'plain' profile
 		 * @param {String} name Profile name. Might be profile itself
+		 * @param {String} syntax. Optional. Current editor syntax. If defined,
+		 * profile is searched in resources first, then in predefined profiles
 		 * @returns {Object}
 		 */
-		get: function(name) {
+		get: function(name, syntax) {
+			if (syntax && _.isString(name)) {
+				// search in user resources first
+				var profile = require('resources').getSubset(syntax, 'profile');
+				if (profile) {
+					name = profile;
+				}
+			}
+			
+			
 			if (_.isString(name) && name.toLowerCase() in profiles)
 				return profiles[name.toLowerCase()];
 				
-			return name && 'tag_case' in name ? name : profiles['plain'];
+			return name && 'tag_case' in name ? this.create(name) : profiles['plain'];
 		},
 		
 		/**
@@ -2690,6 +2904,50 @@ zen_coding.define('profile', function(require, _) {
 			name = (name || '').toLowerCase();
 			if (name in profiles)
 				delete profiles[name];
+		},
+		
+		/**
+		 * Helper function that converts string case depending on 
+		 * <code>caseValue</code> 
+		 * @param {String} str String to transform
+		 * @param {String} caseValue Case value: can be <i>lower</i>, 
+		 * <i>upper</i> and <i>leave</i>
+		 * @returns {String}
+		 */
+		stringCase: function(str, caseValue) {
+			switch (String(caseValue || '').toLowerCase()) {
+				case 'lower':
+					return str.toLowerCase();
+				case 'upper':
+					return str.toUpperCase();
+			}
+			
+			return str;
+		},
+		
+		/**
+		 * Returns quote character based on profile parameter
+		 * @param {String} param Quote parameter, can be <i>single</i> or
+		 * <i>double</i>
+		 * @returns {String}
+		 */
+		quote: function(param) {
+			return param == 'single' ? "'" : '"';
+		},
+		
+		/**
+		 * Returns self-closing tag symbol, based on passed parameter
+		 * @param {String} param
+		 * @returns {String}
+		 */
+		selfClosing: function(param) {
+			if (param == 'xhtml')
+				return ' /';
+			
+			if (param === true)
+				return '/';
+			
+			return '';
 		}
 	};
 });/**
@@ -2709,7 +2967,6 @@ zen_coding.define('transform', function(require, _) {
 	function resolveNode(node, syntax) {
 		if (node.isEmpty()) return null;
 		
-		var result = require('resources').getMatchedResource(node, syntax);
 		/** @type zen_coding.elements */
 		var elements = require('elements');
 		
@@ -2725,6 +2982,14 @@ zen_coding.define('transform', function(require, _) {
 			
 			return null;
 		};
+		
+		var result = require('resources').getMatchedResource(node, syntax);
+		// a little sugar here: if matched resource is a subtree (e.g. parsed
+		// abbreviation , like in 'expando' generator), retrieve children
+		// only for easier tree transform
+		if (elements.is(result, 'parsedElement') && result.isRoot) {
+			result = _.clone(result.children);
+		}
 		
 		if (_.isArray(result)) {
 			// received a set of elements, make sure it contains valid elements only
@@ -2778,6 +3043,22 @@ zen_coding.define('transform', function(require, _) {
 		});
 	}
 	
+	/**
+	 * Resolves implicit node names in parsed tree
+	 * @param {ZenNode} tree
+	 */
+	function resolveNodeNames(tree) {
+		var tagName = require('tagName');
+		_.each(tree.children, function(node) {
+			if (node.hasImpliedName()) {
+				node.name = tagName.resolve(node.parent.name);
+			}
+			resolveNodeNames(node);
+		});
+		
+		return tree;
+	}
+	
 	return  {
 		/**
 		 * Transforms parsed abbreviation tree into final output tree 
@@ -2798,19 +3079,21 @@ zen_coding.define('transform', function(require, _) {
 		 * The parsed tree consists for resolved elements and snippets, defined 
 		 * in <code>zen_settings</code> file mostly. This is an intermediate tree
 		 * structure that can be used to produce final output tree.
-		 * @param {TreeNode} abbrTree Parsed abbreviation of string abbreviation
+		 * @param {TreeNode} abbrTree Parsed abbreviation or abbreviation string 
+		 * (it will be parsed automatically)
 		 * @param {String} syntax
-		 * @param {TreeNode} contextNode Contextual node (XHTML under current 
+		 * @param {TreeNode} contextNode Contextual node (XHTML element under current 
 		 * caret position), for better abbreviation expansion
 		 * @returns {ZenNode}
 		 * @returns {ParsedElement}
 		 */
 		createParsedTree: function(abbrTree, syntax, contextNode) {
 			var elems = require('elements');
-			var parser = require('parser');
+			var parser = require('abbreviationParser');
 			
 			/** @type ParsedElement */
 			var treeRoot = elems.create('parsedElement', contextNode || {}, syntax);
+			treeRoot.isRoot = true;
 			if (_.isString(abbrTree))
 				abbrTree = parser.parse(abbrTree);
 			
@@ -2837,13 +3120,13 @@ zen_coding.define('transform', function(require, _) {
 		},
 		
 		/**
-		 * Roll outs basic Zen Coding tree into simplified, DOM-like tree.
+		 * Rolls out basic Zen Coding tree into simplified, DOM-like tree.
 		 * The simplified tree, for example, represents each multiplied element 
-		 * as a separate element sets with its own content, if exists.
+		 * as a separate element with its own content, if exists.
 		 * 
 		 * The simplified tree element contains some meta info (tag name, attributes, 
 		 * etc.) as well as output strings, which are exactly what will be outputted
-		 * after expanding abbreviation. This tree is used for <i>filtering</i>:
+		 * after expanding abbreviation. This tree can be used for <i>filtering</i>:
 		 * you can apply filters that will alter output strings to get desired look
 		 * of expanded abbreviation.
 		 * 
@@ -2883,7 +3166,8 @@ zen_coding.define('transform', function(require, _) {
 				}
 			}, this);
 			
-			return parent;
+			// make sure all elements has their names
+			return resolveNodeNames(parent);
 		}
 	};
 });/**
@@ -2911,109 +3195,6 @@ zen_coding.define('editorUtils', function(require, _) {
 			}
 			
 			return counter;
-		},
-		
-		/**
-		 * Process text that should be pasted into editor: clear escaped text and
-		 * handle tabstops
-		 * @param {String} text
-		 * @param {Function} escapeFn Handle escaped character. Must return
-		 * replaced value
-		 * @param {Function} tabstopFn Callback function that will be called on every
-		 * tabstob occurrence, passing <b>index</b>, <code>number</code> and 
-		 * <b>value</b> (if exists) arguments. This function must return 
-		 * replacement value
-		 * @return {String} 
-		 */
-		processTextBeforePaste: function(text, escapeFn, tabstopFn) {
-			var i = 0, il = text.length, startIx, _i;
-			var strBuilder = [];
-				
-			var nextWhile = function(ix, fn) {
-				while (ix < il) if (!fn(text.charAt(ix++))) break;
-				return ix - 1;
-			};
-			
-			var utils = require('utils');
-			
-			while (i < il) {
-				var ch = text.charAt(i);
-				if (ch == '\\' && i + 1 < il) {
-					// handle escaped character
-					strBuilder.push(escapeFn(text.charAt(i + 1)));
-					i += 2;
-					continue;
-				} else if (ch == '$') {
-					// looks like a tabstop
-					var next_ch = text.charAt(i + 1) || '';
-					_i = i;
-					if (utils.isNumeric(next_ch)) {
-						// $N placeholder
-						startIx = i + 1;
-						i = nextWhile(startIx, utils.isNumeric);
-						if (startIx < i) {
-							strBuilder.push(tabstopFn(_i, text.substring(startIx, i)));
-							continue;
-						}
-					} else if (next_ch == '{') {
-						// ${N:value} or ${N} placeholder
-						var braceCount = 1;
-						startIx = i + 2;
-						i = nextWhile(startIx, utils.isNumeric);
-						
-						if (i > startIx) {
-							if (text.charAt(i) == '}') {
-								strBuilder.push(tabstopFn(_i, text.substring(startIx, i)));
-								i++; // handle closing brace
-								continue;
-							} else if (text.charAt(i) == ':') {
-								var valStart = i + 2;
-								i = nextWhile(valStart, function(c) {
-									if (c == '{') braceCount++;
-									else if (c == '}') braceCount--;
-									return !!braceCount;
-								});
-								strBuilder.push(tabstopFn(_i, text.substring(startIx, valStart - 2), text.substring(valStart - 1, i)));
-								i++; // handle closing brace
-								continue;
-							}
-						}
-					}
-					i = _i;
-				}
-				
-				// push current character to stack
-				strBuilder.push(ch);
-				i++;
-			}
-			
-			return strBuilder.join('');
-		},
-		
-		/**
-		 * Upgrades tabstops in zen node in order to prevent naming conflicts
-		 * @param {ZenNode} node
-		 * @param {Number} offset Tab index offset
-		 * @returns {Number} Maximum tabstop index in element
-		 */
-		upgradeTabstops: function(node, offset) {
-			var maxNum = 0;
-			var escapeFn = function(ch){ return '\\' + ch; };
-			var tabstopFn = function(i, num, value) {
-				num = parseInt(num);
-				if (num > maxNum) maxNum = num;
-					
-				if (value)
-					return '${' + (num + offset) + ':' + value + '}';
-				else
-					return '$' + (num + offset);
-			};
-			
-			_.each(['start', 'end', 'content'], function(p) {
-				node[p] = this.processTextBeforePaste(node[p], escapeFn, tabstopFn);
-			}, this);
-			
-			return maxNum;
 		},
 		
 		/**
@@ -3065,7 +3246,7 @@ zen_coding.define('editorUtils', function(require, _) {
 		 * @return {String}
 		 */
 		unindent: function(editor, text) {
-			return require('utils').unindentString(text, require('editorUtils').getCurrentLinePadding(editor));
+			return require('utils').unindentString(text, this.getCurrentLinePadding(editor));
 		},
 		
 		/**
@@ -3075,38 +3256,6 @@ zen_coding.define('editorUtils', function(require, _) {
 		 */
 		getCurrentLinePadding: function(editor) {
 			return require('utils').getLinePadding(editor.getCurrentLine());
-		},
-		
-		/**
-		 * Narrow down text indexes, adjusting selection to non-space characters
-		 * @param {String} text
-		 * @param {Number} start
-		 * @param {Number} end
-		 * @return {Array}
-		 */
-		narrowToNonSpace: function(text, start, end) {
-			// narrow down selection until first non-space character
-			var reSpace = /\s|\n|\r/;
-			var isSpace = function(ch) {
-				return reSpace.test(ch);
-			};
-			
-			while (start < end) {
-				if (!isSpace(text.charAt(start)))
-					break;
-					
-				start++;
-			}
-			
-			while (end > start) {
-				end--;
-				if (!isSpace(text.charAt(end))) {
-					end++;
-					break;
-				}
-			}
-			
-			return [start, end];
 		}
 	};
 });
@@ -3142,6 +3291,7 @@ zen_coding.define('actionUtils', function(require, _) {
 			var textCount = 0;
 			
 			var utils = require('utils');
+			var parser = require('abbreviationParser');
 			
 			while (true) {
 				curOffset--;
@@ -3181,7 +3331,7 @@ zen_coding.define('actionUtils', function(require, _) {
 					if (braceCount || textCount) 
 						// respect all characters inside attribute sets or text nodes
 						continue;
-					else if (!utils.isAllowedChar(ch) || (ch == '>' && utils.endsWithTag(str.substring(0, curOffset + 1)))) {
+					else if (!parser.isAllowedChar(ch) || (ch == '>' && utils.endsWithTag(str.substring(0, curOffset + 1)))) {
 						// found stop symbol
 						startIndex = curOffset + 1;
 						break;
@@ -3270,7 +3420,7 @@ zen_coding.define('actionUtils', function(require, _) {
 					var reAttr = /([\w\-:]+)(?:\s*=\s*(?:(?:"((?:\\.|[^"])*)")|(?:'((?:\\.|[^'])*)')|([^>\s]+)))?/g;
 					var startTag = tags[0];
 					var tagAttrs = startTag.full_tag.replace(/^<[\w\-\:]+/, '');
-					var parser = require('parser');
+					var parser = require('abbreviationParser');
 					/** @type TreeNode */
 					var contextNode = new parser.TreeNode;
 					contextNode.name = startTag.name;
@@ -3292,45 +3442,13 @@ zen_coding.define('actionUtils', function(require, _) {
 		},
 		
 		/**
-		 * Returns line bounds for specific character position
-		 * @param {String} text
-		 * @param {Number} from Where to start searching
-		 * @return {Object}
-		 */
-		getLineBounds: function(text, from) {
-			var len = text.length,
-				start = 0,
-				end = len - 1;
-			
-			// search left
-			for (var i = from - 1; i > 0; i--) {
-				var ch = text.charAt(i);
-				if (ch == '\n' || ch == '\r') {
-					start = i + 1;
-					break;
-				}
-			}
-			// search right
-			for (var j = from; j < len; j++) {
-				var ch = text.charAt(j);
-				if (ch == '\n' || ch == '\r') {
-					end = j;
-					break;
-				}
-			}
-			
-			return {start: start, end: end};
-		},
-		
-		/**
 		 * Find expression bounds in current editor at caret position. 
-		 * On each character a <code>fn</code> function will be caller which must 
+		 * On each character a <code>fn</code> function will be called and must 
 		 * return <code>true</code> if current character meets requirements, 
 		 * <code>false</code> otherwise
-		 * @param {zen_editor} editor
+		 * @param {IZenEditor} editor
 		 * @param {Function} fn Function to test each character of expression
-		 * @return {Array} If expression found, returns array with start and end 
-		 * positions 
+		 * @return {Range}
 		 */
 		findExpressionBounds: function(editor, fn) {
 			var content = String(editor.getContent());
@@ -3344,18 +3462,9 @@ zen_coding.define('actionUtils', function(require, _) {
 			// then search right
 			while (exprEnd < il && fn(content.charAt(exprEnd), exprEnd, content)) exprEnd++;
 			
-			return exprEnd > exprStart ? [++exprStart, exprEnd] : null;
-		},
-		
-		/**
-		 * Make decimal number look good: convert it to fixed precision end remove
-		 * trailing zeroes 
-		 * @param {Number} num
-		 * @param {Number} fraction Fraction numbers (default is 2)
-		 * @return {String}
-		 */
-		prettifyNumber: function(num, fraction) {
-			return num.toFixed(typeof fraction == 'undefined' ? 2 : fraction).replace(/\.?0+$/, '');
+			if (exprEnd > exprStart) {
+				return require('range').create([++exprStart, exprEnd]);
+			}
 		},
 		
 		/**
@@ -3372,24 +3481,6 @@ zen_coding.define('actionUtils', function(require, _) {
 			}
 			
 			return false;
-		},
-		
-		/**
-		 * Replaces or adds attribute to the tag
-		 * @param {String} tag
-		 * @param {String} attr_name
-		 * @param {String} attr_value
-		 */
-		replaceOrAppendHTMLAttribute: function(tag, attrName, attrValue) {
-			if (tag.toLowerCase().indexOf(attrName) != -1) {
-				// attribute exists
-				var re = new RegExp(attrName + '=([\'"])(.*?)([\'"])', 'i');
-				return tag.replace(re, function(str, p1, p2){
-					return attrName + '=' + p1 + attrValue + p1;
-				});
-			} else {
-				return tag.replace(/\s*(\/?>)$/, ' ' + attrName + '="' + attrValue + '" $1');
-			}
 		}
 	};
 });/**
@@ -3447,7 +3538,7 @@ zen_coding.define('base64', function(require, _) {
 		 * @return {String}
 		 */
 		decode : function(data) {
-			var o1, o2, o3, h1, h2, h3, h4, bits, i = 0, ac = 0, dec = "", tmpArr = [];
+			var o1, o2, o3, h1, h2, h3, h4, bits, i = 0, ac = 0, tmpArr = [];
 			var b64 = chars, il = data.length;
 
 			if (!data) {
@@ -3621,7 +3712,7 @@ zen_coding.define('base64', function(require, _) {
 	 * @param {Number} start_ix Character index where to start searching pair 
 	 * (commonly, current caret position)
 	 * @param {Function} action Function that creates selection range
-	 * @return {Array|null}
+	 * @return {Array}
 	 */
 	function findPair(html, start_ix, mode, action) {
 		action = action || makeRange;
@@ -3633,7 +3724,6 @@ zen_coding.define('base64', function(require, _) {
 			opening_tag = null,
 			/** @type {tag()} */
 			closing_tag = null,
-			range = null,
 			html_len = html.length,
 			m,
 			ix,
@@ -3781,6 +3871,392 @@ zen_coding.define('base64', function(require, _) {
 	} catch(e){}
 	
 })();/**
+ * Utility module for handling tabstops tokens generated by Zen Coding's 
+ * "Expand Abbreviation" action. The main <code>extract</code> method will take
+ * raw text (for example: <i>${0} some ${1:text}</i>), find all tabstops 
+ * occurrences, replace them with tokens suitable for your editor of choice and 
+ * return object with processed text and list of found tabstops and their ranges.
+ * For sake of portability (Objective-C/Java) the tabstops list is a plain 
+ * sorted array with plain objects.
+ * 
+ * Placeholders with the same are meant to be <i>linked</i> in your editor.
+ * @param {Function} require
+ * @param {Underscore} _  
+ */
+zen_coding.define('tabStops', function(require, _) {
+	/**
+	 * Global placeholder value, automatically incremented by 
+	 * <code>variablesResolver()</code> function
+	 */
+	var startPlaceholderNum = 100;
+	
+	var defaultOptions = {
+		replaceCarets: true,
+		escape: function(ch) {
+			return ch;
+		},
+		tabstop: function(data) {
+			return data.token;
+		}
+	};
+	
+	return {
+		/**
+		 * Main function that looks for a tabstops in provided <code>text</code>
+		 * and returns a processed version of <code>text</code> with expanded 
+		 * placeholders and list of tabstops found.
+		 * @param {String} text Text to process
+		 * @param {Object} options List of processor options:<br>
+		 * 
+		 * <b>replaceCarets</b> : <code>Boolean</code> — replace all default
+		 * caret placeholders (like <i>{%::zen-caret::%}</i>) with <i>${0:caret}</i><br>
+		 * 
+		 * <b>escape</b> : <code>Function</code> — function that handle escaped
+		 * characters (mostly '$'). By default, it returns the character itself 
+		 * to be displayed as is in output, but sometimes you will use 
+		 * <code>extract</code> method as intermediate solution for further 
+		 * processing and want to keep character escaped. Thus, you should override
+		 * <code>escape</code> method to return escaped symbol (e.g. '\\$')<br>
+		 * 
+		 * <b>tabstop</b> : <code>Function</code> – a tabstop handler. Receives 
+		 * a single argument – an object describing token: its position, number 
+		 * group, placeholder and token itself. Should return a replacement 
+		 * string that will appear in final output
+		 * 
+		 * @returns {Object} Object with processed <code>text</code> property
+		 * and array of <code>tabstops</code> found
+		 * @memberOf tabStops
+		 */
+		extract: function(text, options) {
+			// prepare defaults
+			var utils = require('utils');
+			var placeholders = {carets: ''};
+			var marks = [];
+			
+			options = _.extend({}, defaultOptions, options, {
+				tabstop: function(data) {
+					var token = data.token;
+					var ret = '';
+					if (data.placeholder == 'cursor') {
+						marks.push({
+							start: data.start,
+							end: data.start + token.length,
+							group: 'carets',
+							value: ''
+						});
+					} else {
+						// unify placeholder value for single group
+						if ('placeholder' in data)
+							placeholders[data.group] = data.placeholder;
+						
+						if (data.group in placeholders)
+							ret = placeholders[data.group];
+						
+						marks.push({
+							start: data.start,
+							end: data.start + token.length,
+							group: data.group,
+							value: ret
+						});
+					}
+					
+					return token;
+				}
+			});
+			
+			if (options.replaceCarets) {
+				text = text.replace(new RegExp( utils.escapeForRegexp( utils.getCaretPlaceholder() ), 'g'), '${0:cursor}');
+			}
+			
+			// locate tabstops and unify group's placeholders
+			text = this.processText(text, options);
+			
+			// now, replace all tabstops with placeholders
+			var buf = utils.stringBuilder(), lastIx = 0;
+			var tabStops = _.map(marks, function(mark) {
+				buf.append(text.substring(lastIx, mark.start));
+				
+				var pos = buf.length;
+				var ph = placeholders[mark.group] || '';
+				
+				buf.append(ph);
+				lastIx = mark.end;
+				
+				return {
+					group: mark.group,
+					start: pos,
+					end:  pos + ph.length
+				};
+			});
+			
+			buf.append(text.substring(lastIx));
+			
+			return {
+				text: buf.toString(),
+				tabstops: _.sortBy(tabStops, 'start')
+			};
+		},
+		
+		/**
+		 * Text processing routine. Locates escaped characters and tabstops and
+		 * replaces them with values returned by handlers defined in 
+		 * <code>options</code>
+		 * @param {String} text
+		 * @param {Object} options See <code>extract</code> method options 
+		 * description
+		 * @returns {String}
+		 */
+		processText: function(text, options) {
+			options = _.extend({}, defaultOptions, options);
+			
+			var buf = require('utils').stringBuilder();
+			/** @type StringStream */
+			var stream = require('stringStream').create(text);
+			var ch, m, a;
+			
+			while (ch = stream.next()) {
+				if (ch == '\\' && !stream.eol()) {
+					// handle escaped character
+					buf.append(options.escape(stream.next()));
+					continue;
+				}
+				
+				a = ch;
+				
+				if (ch == '$') {
+					// looks like a tabstop
+					stream.start = stream.pos - 1;
+					
+					if (m = stream.match(/^[0-9]+/)) {
+						// it's $N
+						a = options.tabstop({
+							start: buf.length, 
+							group: stream.current().substr(1),
+							token: stream.current()
+						});
+					} else if (m = stream.match(/^\{([0-9]+)(:.+?)?\}/)) {
+						// ${N:value} or ${N} placeholder
+						var obj = {
+							start: buf.length, 
+							group: m[1],
+							token: stream.current()
+						};
+						
+						if (m[2]) {
+							obj.placeholder = m[2].substr(1);
+						}
+						
+						a = options.tabstop(obj);
+					}
+				}
+				
+				buf.append(a);
+			}
+			
+			return buf.toString();
+		},
+		
+		/**
+		 * Upgrades tabstops in output node in order to prevent naming conflicts
+		 * @param {ZenNode} node
+		 * @param {Number} offset Tab index offset
+		 * @returns {Number} Maximum tabstop index in element
+		 */
+		upgrade: function(node, offset) {
+			var maxNum = 0;
+			var options = {
+				escape: function(ch) {
+					return '\\' + ch;
+				},
+				tabstop: function(data) {
+					var group = parseInt(data.group);
+					if (group > maxNum) maxNum = group;
+						
+					if (data.placeholder)
+						return '${' + (group + offset) + ':' + data.placeholder + '}';
+					else
+						return '$' + (group + offset);
+				}
+			};
+			
+			_.each(['start', 'end', 'content'], function(p) {
+				node[p] = this.processText(node[p], options);
+			}, this);
+			
+			return maxNum;
+		},
+		
+		/**
+		 * Helper function that produces a callback function for 
+		 * <code>replaceVariables()</code> method from {@link utils}
+		 * module. This callback will replace variable definitions (like 
+		 * ${var_name}) with their value defined in <i>resource</i> module,
+		 * or outputs tabstop with variable name otherwise.
+		 * @param {ZenNode} node Context node
+		 * @returns {Function}
+		 */
+		variablesResolver: function(node) {
+			var placeholderMemo = {};
+			var res = require('resources');
+			return function(str, varName) {
+				var attr = node.getAttribute(varName);
+				if (attr !== null)
+					return attr;
+				
+				var varValue = res.getVariable(varName);
+				if (varValue)
+					return varValue;
+				
+				// output as placeholder
+				if (!placeholderMemo[varName])
+					placeholderMemo[varName] = startPlaceholderNum++;
+					
+				return '${' + placeholderMemo[varName] + ':' + varName + '}';
+			};
+		},
+		
+		resetPlaceholderCounter: function() {
+			startPlaceholderNum = 100;
+		}
+	};
+});/**
+ * Common module's preferences storage. This module 
+ * provides general storage for all module preferences, their description and
+ * default values.<br><br>
+ * 
+ * This module can also be used to list all available properties to create 
+ * UI for updating properties
+ * 
+ * @memberOf __preferencesDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.define('preferences', function(require, _) {
+	var preferences = {};
+	var _dbg = null;
+	
+	function isValueObj(obj) {
+		return _.isObject(obj) 
+			&& 'value' in obj 
+			&& _.keys(obj).length < 3;
+	}
+	
+	return {
+		/**
+		 * Updates/creates new preference item
+		 * @param {String} name Preference name. You can also pass object
+		 * with many options
+		 * @param {Object} value Preference default value
+		 * @param {String} description Item textual description
+		 * @memberOf preferences
+		 */
+		set: function(name, value, description) {
+			var prefs = name;
+			if (_.isString(name)) {
+				prefs = {};
+				prefs[name] = {
+					value: value,
+					description: description
+				};
+			}
+			
+			_.each(prefs, function(v, k) {
+				preferences[k] = isValueObj(v) ? v : {value: v};
+			});
+		},
+		
+		/**
+		 * Returns preference value
+		 * @param {String} name
+		 * @returns {String} Returns <code>undefined</code> if preference is 
+		 * not defined
+		 */
+		get: function(name) {
+			return name in preferences ? preferences[name].value : void 0;
+		},
+		
+		/**
+		 * Returns comma-separated preference value as array of values
+		 * @param {String} name
+		 * @returns {Array} Returns <code>undefined</code> if preference is 
+		 * not defined, <code>null</code> if string cannot be converted to array
+		 */
+		getArray: function(name) {
+			var val = this.get(name);
+			if (!_.isUndefined(val)) {
+				val = _.map(val.split(','), require('utils').trim);
+				if (!val.length)
+					val = null;
+			}
+			
+			return val;
+		},
+		
+		/**
+		 * Returns description of preference item
+		 * @param {String} name Preference name
+		 * @returns {Object}
+		 */
+		description: function(name) {
+			return name in preferences ? preferences[name].description : void 0;
+		},
+		
+		/**
+		 * Removes specified preference(s)
+		 * @param {String} name Preference name (or array of names)
+		 */
+		remove: function(name) {
+			if (!_.isArray(name))
+				name = [name];
+			
+			_.each(name, function(key) {
+				if (key in preferences)
+					delete preferences[key];
+			});
+		},
+		
+		/**
+		 * Returns sorted list of all available properties
+		 * @returns {Array}
+		 */
+		list: function() {
+			return _.map(_.keys(preferences).sort(), function(key) {
+				return {
+					name: key,
+					value: preferences[key].value,
+					description: preferences[key].description
+				};
+			});
+		},
+		
+		/**
+		 * Loads user-defined preferences from JSON
+		 * @param {Object} json
+		 * @returns
+		 */
+		load: function(json) {
+			_.each(json, function(value, key) {
+				this.set(key, value);
+			}, this);
+		},
+		
+		/**
+		 * For unit testing: use empty storage
+		 */
+		_startTest: function() {
+			_dbg = preferences;
+			preferences = {};
+		},
+		
+		/**
+		 * For unit testing: restore original storage
+		 */
+		_stopTest: function() {
+			preferences = _dbg;
+		}
+	};
+});/**
  * Module for handling filters
  * @param {Function} require
  * @param {Underscore} _
@@ -3992,15 +4468,523 @@ zen_coding.define('elements', function(require, _) {
 	
 	return result;
 });/**
+ * Parsed element factory
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Parsed element that represents intermediate node in abbreviation 
+	 * transformation process. This element will then be converted to 
+	 * <code>ZenNode</code>
+	 * 
+	 * @param {TreeNode} node Parsed tree node
+	 * @param {String} syntax Tag type (html, xml)
+	 * @param {DataElement} resource Matched element resource from <code>settings.json</code>
+	 * @param {Object} options Custom options dictionary. It will be inherited in
+	 * <code>ZenNode</code>
+	 */
+	function ParsedElement(node, syntax, resource, options) {
+		this._abbr = resource;
+		
+		this.name = this._abbr ? this._abbr.name : node.name;
+		this.real_name = node.name;
+		this.count = node.count || 1;
+		this.syntax = syntax;
+		this._content = '';
+		this._paste_content = '';
+		this.repeat_by_lines = !!node.is_repeating;
+		this.is_repeating = node && node.count > 1;
+		this.parent = null;
+		this.has_implicit_name = !!node.has_implict_name;
+		this.children = [];
+		this.options = _.extend({}, options || {});
+		
+		this.setContent(node.text);
+	}
+
+	ParsedElement.prototype = {
+		/**
+		 * Adds new child tag to current one
+		 * @param {ParsedElement} elem
+		 */
+		addChild: function(elem) {
+			elem.parent = this;
+			this.children.push(elem);
+		},
+		
+		/**
+		 * Check if current node contains children
+		 * @returns {Boolean}
+		 */
+		hasChildren: function() {
+			return !!this.children.length;
+		},
+		
+		/**
+		 * Adds new attribute
+		 * @param {String} name Attribute's name
+		 * @param {String} value Attribute's value
+		 */
+		addAttribute: function(name, value) {
+			if (!this.attributes)
+				this.attributes = [];
+				
+			if (!this._attr_hash)
+				this._attr_hash = {};
+			
+			/** @type {zen_coding.utils} */
+			var utils = require('utils');
+			
+			// escape pipe (caret) character with internal placeholder
+			value = utils.replaceUnescapedSymbol(value || '', '|', utils.getCaretPlaceholder());
+			
+			var a;
+			if (name in this._attr_hash) {
+				// attribute already exists, decide what to do
+				a = this._attr_hash[name];
+				if (name == 'class') {
+					// 'class' is a magic attribute
+					a.value += ((a.value) ? ' ' : '') + value;
+				} else {
+					a.value = value;
+				}
+			} else {
+				a = {name: name, value: value};
+				this._attr_hash[name] = a;
+				this.attributes.push(a);
+			}
+		},
+		
+		/**
+		 * Copy attributes from parsed node
+		 */
+		copyAttributes: function(node) {
+			if (node && node.attributes) {
+				var that = this;
+				_.each(node.attributes, function(attr) {
+					that.addAttribute(attr.name, attr.value);
+				});
+			}
+		},
+		
+		/**
+		 * This function tests if current tags' content contains xHTML tags. 
+		 * This function is mostly used for output formatting
+		 */
+		hasTagsInContent: function() {
+			return require('utils').matchesTag(this.getContent());
+		},
+		
+		/**
+		 * Set textual content for tag
+		 * @param {String} str Tag's content
+		 */
+		setContent: function(data) {
+			// XXX do I really should escape pipe here?
+			// I think 'resource' module is a better place
+			if (_.isString(data)) {
+				var utils = require('utils');
+				this._content = utils.replaceUnescapedSymbol(data || '', '|', utils.getCaretPlaceholder());
+			} else if (_.isFunction(data)) {
+				this._content = data;
+			}
+		},
+		
+		/**
+		 * Returns tag's textual content
+		 * @return {String}
+		 */
+		getContent: function() {
+			return _.isFunction(this._content) 
+				? this._content(this) 
+				: this._content || '';
+		},
+		
+		/**
+		 * Set content that should be pasted to the output
+		 * @param {String} val
+		 */
+		setPasteContent: function(val) {
+			this._paste_content = require('utils').escapeText(val);
+		},
+		
+		/**
+		 * Get content that should be pasted to the output
+		 * @return {String}
+		 */
+		getPasteContent: function() {
+			return this._paste_content;
+		},
+		
+		/**
+		 * Search for deepest and latest child of current element
+		 * @return {ParsedElement} Returns null if there's no children
+		 */
+		findDeepestChild: function() {
+			if (!this.children || !this.children.length)
+				return null;
+				
+			var deepestChild = this;
+			while (deepestChild.children.length) {
+				deepestChild = _.last(deepestChild.children);
+			}
+			
+			return deepestChild;
+		}
+	};
+	
+	var elems = require('elements');
+	elems.add('parsedElement', function(node, syntax, resource, options) {
+		var res = require('resources');
+		
+		if (_.isString(resource)) {
+			resource = elems.create('element', resource);
+		}
+		
+		if (!resource && node.name) {
+			resource = res.getAbbreviation(syntax, node.name);
+		}
+		
+		if (resource && elems.is(resource, 'reference')) {
+			resource = res.getAbbreviation(syntax, resource.data);
+		}
+		
+		var elem = new ParsedElement(node, syntax, resource, options);
+		// add default attributes
+		if (elem._abbr)
+			elem.copyAttributes(elem._abbr);
+		
+		elem.copyAttributes(node);
+		
+		return elem;
+	});
+	
+	elems.add('parsedSnippet', function(node, syntax, resource, options) {
+		if (_.isString(resource))
+			resource = elems.create('snippet', resource);
+		
+		var elem = new ParsedElement(node, syntax, resource, options);
+		var utils = require('utils');
+		var res = require('resources');
+		
+		var data = resource ? resource.data : res.getSnippet(syntax, elem.name);
+		// XXX do I really should escape pipe here?
+		// I think 'resource' module is a better place
+		elem.value = utils.replaceUnescapedSymbol(data, '|', utils.getCaretPlaceholder());
+		
+		// override some attributes
+		elem.addAttribute('id', utils.getCaretPlaceholder());
+		elem.addAttribute('class', utils.getCaretPlaceholder());
+		elem.copyAttributes(node);
+		
+		return elem;
+	});
+});/**
+ * <code>ZenNode</code> — an element in final transformation process which will 
+ * be used to generate output
+ * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Test if text contains output placeholder $#
+	 * @param {String} text
+	 * @return {Boolean}
+	 */
+	function hasOutputPlaceholder(text) {
+		for (var i = 0, il = text.length; i < il; i++) {
+			var ch = text.charAt(i);
+			if (ch == '\\') { // escaped char
+				i++;
+				continue;
+			} else if (ch == '$' && text.charAt(i + 1) == '#') {
+				return true;
+			}
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Creates simplified element from parsed tree
+	 * @param {ParsedElement} elem
+	 */
+	function ZenNode(elem, options) {
+		var elems = require('elements');
+		
+		this.nodeType = elems.is(elem, 'parsedSnippet') ? 'snippet' : 'element';
+		this.children = [];
+		this.counter = 1;
+		this.options = _.extend({}, elem.options, options || {});
+		
+		// copy attributes
+		_.each('name,real_name,is_repeating,repeat_by_lines,has_implicit_name'.split(','), function(p) {
+			this[p] = elem[p];
+		}, this);
+		
+		// create deep copy of attribute list so we can change
+		// their values in runtime without affecting other nodes
+		// created from the same element
+		this.attributes = _.map(elem.attributes, function(a) {
+			return _.clone(a);
+		});
+		
+		/** @type {ParsedElement} Source element from which current element was created */
+		this.source = elem;
+		
+		/** @type String Name of current node */
+		this.name = elem.name;
+		
+		// relations
+		/** @type {ZenNode} */
+		this.parent = null;
+		/** @type {ZenNode} */
+		this.nextSibling = null;
+		/** @type {ZenNode} */
+		this.previousSibling = null;
+		
+		// output params
+		this.start = '';
+		this.end = '';
+		this.content = elem.getContent() || '';
+		this.padding = '';
+	}
+	
+	ZenNode.prototype = {
+		/**
+		 * Add child node
+		 * @param {ZenNode} node
+		 */
+		addChild: function(node) {
+			node.parent = this;
+			
+			// check for implicit name
+//			if (node.has_implicit_name && this.source.name && this.isInline()) {
+//				node.name = 'span';
+//			}
+			
+			var lastChild = _.last(this.children);
+			if (lastChild) {
+				node.previousSibling = lastChild;
+				lastChild.nextSibling = node;
+			}
+			
+			this.children.push(node);
+		},
+		
+		/**
+		 * Returns attribute object
+		 * @private
+		 * @param {String} name Attribute name
+		 */
+		_getAttr: function(name) {
+			name = name.toLowerCase();
+			return _.find(this.attributes, function(a) {
+				return a.name.toLowerCase() == name;
+			});
+		},
+		
+		/**
+		 * Get attribute's value.
+		 * @param {String} name
+		 * @return {String} Returns <code>null</code> if attribute wasn't found
+		 */
+		getAttribute: function(name) {
+			var attr = this._getAttr(name);
+			return _.isUndefined(attr) ? null : attr.value;
+		},
+		
+		/**
+		 * Set attribute's value.
+		 * @param {String} name
+		 * @param {String} value
+		 */
+		setAttribute: function(name, value) {
+			var attr = this._getAttr(name);
+			if (attr)
+				attr.value = value;
+		},
+		
+		/**
+		 * Test if current element is unary (no closing tag)
+		 * @return {Boolean}
+		 */
+		isUnary: function() {
+			if (this.nodeType == 'snippet')
+				return false;
+				
+			return (this.source._abbr && this.source._abbr.is_empty) 
+				|| require('tagName').isEmptyElement(this.name);
+		},
+		
+		/**
+		 * Test if current element is inline-level (like &lt;strong&gt;, &lt;img&gt;)
+		 * @return {Boolean}
+		 */
+		isInline: function() {
+			return this.nodeType == 'text' || !this.name
+				|| require('tagName').isInlineLevel(this.name);
+		},
+		
+		/**
+		 * Test if current element is block-level
+		 * @return {Boolean}
+		 */
+		isBlock: function() {
+			return this.nodeType == 'snippet' || !this.isInline();
+		},
+		
+		/**
+		 * This function tests if current elements' content contains xHTML tags. 
+		 * This function is mostly used for output formatting
+		 */
+		hasTagsInContent: function() {
+			return require('utils').matchesTag(this.content);
+		},
+		
+		/**
+		 * Check if element has child elements
+		 * @return {Boolean}
+		 */
+		hasChildren: function() {
+			return !!this.children.length;
+		},
+		
+		/**
+		 * Test if current element contains block-level children
+		 * @return {Boolean}
+		 */
+		hasBlockChildren: function() {
+			return (this.hasTagsInContent() && this.isBlock()) 
+				|| _.any(this.children, function(child) {
+					return child.isBlock();
+				});
+		},
+		
+		/**
+		 * Search for deepest and latest child of current element
+		 * @return {ZenNode} Returns <code>null</code> if there's no children
+		 */
+		findDeepestChild: function() {
+			if (!this.children.length)
+				return null;
+				
+			var deepestChild = this;
+			while (deepestChild.children.length) {
+				deepestChild = _.last(deepestChild.children);
+			}
+			
+			return deepestChild;
+		},
+		
+		/**
+		 * Returns string output for current node
+		 * @return {String}
+		 */
+		toString: function() {
+			var innerContent = _.map(this.children, function(child) {
+				return child.toString();
+			}).join('');
+			
+			return this.start + this.content + innerContent + this.end;
+		},
+		
+		/**
+		 * Test if current element contains output placeholder (aka $#)
+		 * @return {Boolean}
+		 */
+		hasOutputPlaceholder: function() {
+			if (hasOutputPlaceholder(this.content)) {
+				return true;
+			} else {
+				// search inside attributes
+				for (var i = 0, il = this.attributes.length; i < il; i++) {
+					if (hasOutputPlaceholder(this.attributes[i].value))
+						return true;
+				}
+			}
+			
+			return false;
+		},
+		
+		/**
+		 * Recursively search for elements with output placeholders (aka $#)
+		 * inside current element (not included in result)
+		 * @param {Array} receiver
+		 * @return {Array} Array of elements with output placeholders.  
+		 */
+		findElementsWithOutputPlaceholder: function(receiver) {
+			receiver = receiver || [];
+			_.each(this.children, function(child) {
+				if (child.hasOutputPlaceholder()) {
+					receiver.push(child);
+				}
+				child.findElementsWithOutputPlaceholder(receiver);
+			});
+			
+			return receiver;
+		},
+		
+		/**
+		 * Paste content in context of current node. Pasting is a special case
+		 * of recursive adding content in node. 
+		 * This function will try to find $# placeholder inside node's 
+		 * attributes and text content and replace in with <code>text</code>.
+		 * If it doesn't find $# placeholder, it will put <code>text</code>
+		 * value as the deepest child content
+		 * @param {String} text Text to paste
+		 */
+		pasteContent: function(text) {
+			var symbol = '$#';
+			var r = [symbol, text];
+			var replaceFn = function() {return r;};
+			var utils = require('utils');
+			var items = [];
+				
+			if (this.hasOutputPlaceholder())
+				items.push(this);
+				
+			items = items.concat(this.findElementsWithOutputPlaceholder());
+			
+			if (items.length) {
+				_.each(items, function(item){
+					item.content = utils.replaceUnescapedSymbol(item.content, symbol, replaceFn);
+					_.each(item.attributes, function(a) {
+						a.value = utils.replaceUnescapedSymbol(a.value, symbol, replaceFn);
+					});
+				});
+			} else {
+				// no placeholders found, add content to the deepest child
+				var child = this.findDeepestChild() || this;
+				child.content += text;
+			}
+		},
+		
+		/**
+		 * Check if current node name implied name (e.g. name is undefined,
+		 * but it should exist in output)
+		 * @returns {Boolean}
+		 */
+		hasImpliedName: function() {
+			return !this.name && this.has_implicit_name && this.nodeType == 'element';
+		}
+	};
+	
+	require('elements').add('ZenNode', function(elem, options) {
+		return new ZenNode(elem, options);
+	});
+});/**
  * Zen Coding abbreviation parser. This module is designed to be stand-alone
  * (e.g. without any dependencies) so authors can copy this file into their
  * projects
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * @memberOf __zen_parser
- */var zen_parser = (/** @constructor */ function(){
-	
-	var re_valid_name = /^[\w\d\-_\$\:@!]+\+?$/i;
+ * @memberOf __abbreviationParser
+ * @constructor
+ */zen_coding.define('abbreviationParser', function(require, _) {
+	var reValidName = /^[\w\d\-_\$\:@!]+\+?$/i;
 	
 	/**
 	 * @type TreeNode
@@ -4069,14 +5053,14 @@ zen_coding.define('elements', function(require, _) {
 					
 				if (name) {
 					var attr_result = parseAttributes(name);
-					this.name = attr_result[0] || 'div';
+					this.name = attr_result[0] || '';
 					this.has_implict_name = !attr_result[0];
 					this.attributes = attr_result[1];
 				}
 			}
 			
 			// validate name
-			if (this.name && !re_valid_name.test(this.name)) {
+			if (this.name && !reValidName.test(this.name)) {
 				throw new Error('InvalidAbbreviation');
 			}
 		},
@@ -4111,7 +5095,7 @@ zen_coding.define('elements', function(require, _) {
 					output += ' [' + attrs.join(', ') + ']';
 				}
 			}
-			var result = zen_coding.repeatString('-', level)
+			var result = require('utils').repeatString('-', level)
 				+ output 
 				+ '\n';
 			for (var i = 0, il = this.children.length; i < il; i++) {
@@ -4136,6 +5120,8 @@ zen_coding.define('elements', function(require, _) {
 		},
 		
 		/**
+		 * Indicates empty node (i.e. without abbreviation). It may be a 
+		 * grouping node and should not be outputted
 		 * @return {Boolean}
 		 */
 		isEmpty: function() {
@@ -4148,6 +5134,14 @@ zen_coding.define('elements', function(require, _) {
 		 */
 		isTextNode: function() {
 			return !this.name && this.text;
+		},
+		
+		/**
+		 * Indicates whether this node may be used to build elements or snippets
+		 * @returns {Boolean}
+		 */
+		isElement: function() {
+			return !this.isEmpty() && !this.isTextNode();
 		},
 		
 		/**
@@ -4219,50 +5213,49 @@ zen_coding.define('elements', function(require, _) {
 	
 	/**
 	 * Extract attributes and their values from attribute set 
-	 * @param {String} attr_set
+	 * @param {String} attrSet
 	 */
-	function extractAttributes(attr_set) {
-		attr_set = trim(attr_set);
-		var loop_count = 100, // endless loop protection
-			re_string = /^(["'])((?:(?!\1)[^\\]|\\.)*)\1/,
-			result = [],
-			attr;
+	function extractAttributes(attrSet) {
+		attrSet = trim(attrSet);
+		var loopCount = 1000; // endless loop protection
+		var reString = /^(["'])((?:(?!\1)[^\\]|\\.)*)\1/;
+		var result = [];
+		var attr;
 			
-		while (attr_set && loop_count--) {
-			var attr_name = getWord(0, attr_set);
+		while (attrSet && loopCount--) {
+			var attrName = getWord(0, attrSet);
 			attr = null;
-			if (attr_name) {
-				attr = {name: attr_name, value: ''};
-//				result[attr_name] = '';
+			if (attrName) {
+				attr = {name: attrName, value: ''};
 				// let's see if attribute has value
-				var ch = attr_set.charAt(attr_name.length);
+				var ch = attrSet.charAt(attrName.length);
 				switch (ch) {
 					case '=':
-						var ch2 = attr_set.charAt(attr_name.length + 1);
+						var ch2 = attrSet.charAt(attrName.length + 1);
 						if (ch2 == '"' || ch2 == "'") {
 							// we have a quoted string
-							var m = attr_set.substring(attr_name.length + 1).match(re_string);
+							var m = attrSet.substring(attrName.length + 1).match(reString);
 							if (m) {
 								attr.value = m[2];
-								attr_set = trim(attr_set.substring(attr_name.length + m[0].length + 1));
+								attrSet = trim(attrSet.substring(attrName.length + m[0].length + 1));
 							} else {
 								// something wrong, break loop
-								attr_set = '';
+								attrSet = '';
 							}
 						} else {
 							// unquoted string
-							var m = attr_set.substring(attr_name.length + 1).match(/(.+?)(\s|$)/);
+							var m = attrSet.substring(attrName.length + 1).match(/(.+?)(\s|$)/);
 							if (m) {
 								attr.value = m[1];
-								attr_set = trim(attr_set.substring(attr_name.length + m[1].length + 1));
+								attrSet = trim(attrSet.substring(attrName.length + m[1].length + 1));
 							} else {
 								// something wrong, break loop
-								attr_set = '';
+								attrSet = '';
 							}
 						}
 						break;
 					default:
-						attr_set = trim(attr_set.substring(attr_name.length));
+						attrSet = trim(attrSet.substring(attrName.length));
 						break;
 				}
 			} else {
@@ -4288,55 +5281,55 @@ zen_coding.define('elements', function(require, _) {
 		 * [attr]
 		 * #item[attr=Hello other="World"].class
 		 */
-		var result = [],
-			name = '',
-			collect_name = true,
-			class_name,
-			char_map = {'#': 'id', '.': 'class'};
+		var result = [];
+		var name = '';
+		var collectName = true;
+		var className = null;
+		var charMap = {'#': 'id', '.': 'class'};
 		
 		// walk char-by-char
-		var i = 0,
-			il = str.length,
-			val;
+		var i = 0;
+		var il = str.length;
+		var val;
 			
 		while (i < il) {
 			var ch = str.charAt(i);
 			switch (ch) {
 				case '#': // id
 					val = getWord(i, str.substring(1));
-					result.push({name: char_map[ch], value: val});
+					result.push({name: charMap[ch], value: val});
 					i += val.length + 1;
-					collect_name = false;
+					collectName = false;
 					break;
 				case '.': // class
 					val = getWord(i, str.substring(1));
-					if (!class_name) {
+					if (!className) {
 						// remember object pointer for value modification
-						class_name = {name: char_map[ch], value: ''};
-						result.push(class_name);
+						className = {name: charMap[ch], value: ''};
+						result.push(className);
 					}
 					
-					class_name.value += ((class_name.value) ? ' ' : '') + val;
+					className.value += (className.value ? ' ' : '') + val;
 					i += val.length + 1;
-					collect_name = false;
+					collectName = false;
 					break;
 				case '[': //begin attribute set
 					// search for end of set
-					var end_ix = str.indexOf(']', i);
-					if (end_ix == -1) {
+					var endIx = str.indexOf(']', i);
+					if (endIx == -1) {
 						// invalid attribute set, stop searching
 						i = str.length;
 					} else {
-						var attrs = extractAttributes(str.substring(i + 1, end_ix));
+						var attrs = extractAttributes(str.substring(i + 1, endIx));
 						for (var j = 0, jl = attrs.length; j < jl; j++) {
 							result.push(attrs[j]);
 						}
-						i = end_ix;
+						i = endIx;
 					}
-					collect_name = false;
+					collectName = false;
 					break;
 				default:
-					if (collect_name)
+					if (collectName)
 						name += ch;
 					i++;
 			}
@@ -4373,35 +5366,35 @@ zen_coding.define('elements', function(require, _) {
 		if (expr.indexOf('{') == -1)
 			return [expr];
 			
-		var attr_lvl = 0,
-			text_lvl = 0,
-			brace_stack = [],
-			i = 0,
-			il = expr.length,
-			ch;
+		var attrLvl = 0;
+		var textLvl = 0;
+		var braceStack = [];
+		var i = 0;
+		var il = expr.length;
+		var ch;
 			
 		while (i < il) {
 			ch = expr.charAt(i);
 			switch (ch) {
 				case '[':
-					if (!text_lvl)
-						attr_lvl++;
+					if (!textLvl)
+						attrLvl++;
 					break;
 				case ']':
-					if (!text_lvl)
-						attr_lvl--;
+					if (!textLvl)
+						attrLvl--;
 					break;
 				case '{':
-					if (!attr_lvl) {
-						text_lvl++;
-						brace_stack.push(i);
+					if (!attrLvl) {
+						textLvl++;
+						braceStack.push(i);
 					}
 					break;
 				case '}':
-					if (!attr_lvl) {
-						text_lvl--;
-						var brace_start = brace_stack.pop();
-						if (text_lvl === 0) {
+					if (!attrLvl) {
+						textLvl--;
+						var brace_start = braceStack.pop();
+						if (textLvl === 0) {
 							// found braces bounds
 							return [
 								expr.substring(0, brace_start),
@@ -4425,23 +5418,21 @@ zen_coding.define('elements', function(require, _) {
 		 * text nodes and attributes. Each node of the tree is a single 
 		 * abbreviation. Tree represents actual structure of the outputted 
 		 * result
-		 * @memberOf zen_parser
+		 * @memberOf abbreviationParser
 		 * @param {String} abbr Abbreviation to parse
 		 * @return {TreeNode}
 		 */
 		parse: function(abbr) {
-			var root = new TreeNode,
-				context = root.addChild(),
-				i = 0,
-				il = abbr.length,
-				text_lvl = 0,
-				attr_lvl = 0,
-				group_lvl = 0,
-				group_stack = [root],
-				ch, prev_ch,
-				token = '';
+			var root = new TreeNode;
+			var context = root.addChild();
+			var i = 0;
+			var il = abbr.length;
+			var textLvl = 0;
+			var attrLvl = 0;
+			var groupStack = [root];
+			var ch, prevCh, token = '';
 				
-			group_stack.last = function() {
+			groupStack.last = function() {
 				return this[this.length - 1];
 			};
 			
@@ -4453,50 +5444,50 @@ zen_coding.define('elements', function(require, _) {
 				
 			while (i < il) {
 				ch = abbr.charAt(i);
-				prev_ch = i ? abbr.charAt(i - 1) : '';
+				prevCh = i ? abbr.charAt(i - 1) : '';
 				switch (ch) {
 					case '{':
-						if (!attr_lvl)
-							text_lvl++;
+						if (!attrLvl)
+							textLvl++;
 						token += ch;
 						break;
 					case '}':
-						if (!attr_lvl)
-							text_lvl--;
+						if (!attrLvl)
+							textLvl--;
 						token += ch;
 						break;
 					case '[':
-						if (!text_lvl)
-							attr_lvl++;
+						if (!textLvl)
+							attrLvl++;
 						token += ch;
 						break;
 					case ']':
-						if (!text_lvl)
-							attr_lvl--;
+						if (!textLvl)
+							attrLvl--;
 						token += ch;
 						break;
 					case '(':
-						if (!text_lvl && !attr_lvl) {
+						if (!textLvl && !attrLvl) {
 							// beginning of the new group
 							dumpToken();
 							
-							if (prev_ch != '+' && prev_ch != '>') {
+							if (prevCh != '+' && prevCh != '>') {
 								// previous char is not an operator, assume it's
 								// a sibling
 								context = context.parent.addChild();
 							}
 							
-							group_stack.push(context);
+							groupStack.push(context);
 							context = context.addChild();
 						} else {
 							token += ch;
 						}
 						break;
 					case ')':
-						if (!text_lvl && !attr_lvl) {
+						if (!textLvl && !attrLvl) {
 							// end of the group, pop stack
 							dumpToken();
-							context = group_stack.pop();
+							context = groupStack.pop();
 							
 							if (i < il - 1 && abbr.charAt(i + 1) == '*') {
 								// group multiplication
@@ -4521,7 +5512,7 @@ zen_coding.define('elements', function(require, _) {
 						}
 						break;
 					case '+': // sibling operator
-						if (!text_lvl && !attr_lvl && i != il - 1 /* expando? */) {
+						if (!textLvl && !attrLvl && i != il - 1 /* expando? */) {
 							dumpToken();
 							context = context.parent.addChild();
 						} else {
@@ -4529,7 +5520,7 @@ zen_coding.define('elements', function(require, _) {
 						}
 						break;
 					case '>': // child operator
-						if (!text_lvl && !attr_lvl) {
+						if (!textLvl && !attrLvl) {
 							dumpToken();
 							context = context.addChild();
 						} else {
@@ -4548,14 +5539,26 @@ zen_coding.define('elements', function(require, _) {
 			return optimizeTree(root);
 		},
 		
+		/**
+		 * Check if passed symbol is valid symbol for abbreviation expression
+		 * @param {String} ch
+		 * @return {Boolean}
+		 */
+		isAllowedChar: function(ch) {
+			ch = String(ch); // convert Java object to JS
+			var charCode = ch.charCodeAt(0);
+			var specialChars = '#.>+*:$-_!@[]()|';
+			
+			return (charCode > 64 && charCode < 91)       // uppercase letter
+					|| (charCode > 96 && charCode < 123)  // lowercase letter
+					|| isNumeric(ch)                 // number
+					|| specialChars.indexOf(ch) != -1;    // special character
+		},
+		
 		TreeNode: TreeNode,
 		optimizeTree: optimizeTree
 	};
-})();
-
-try {
-	zen_coding.define('parser', zen_parser);
-} catch(e) {};/**
+});/**
  * @author Stoyan Stefanov
  * @link https://github.com/stoyan/etc/tree/master/cssex
  */
@@ -4917,7 +5920,18 @@ var walker, tokens = [], isOp, isNameChar, isDigit;
         
         throw error("Unrecognized character");
     }
-
+    
+    /**
+	 * Returns newline character at specified position in content
+	 * @param {String} content
+	 * @param {Number} pos
+	 * @return {String}
+	 */
+	function getNewline(content, pos) {
+		return content.charAt(pos) == '\r' && content.charAt(pos + 1) == '\n' 
+			? '\r\n' 
+			: content.charAt(pos);
+	}
 
     return {
     	/**
@@ -4933,6 +5947,28 @@ var walker, tokens = [], isOp, isNameChar, isDigit;
             }
             return tokens;
         },
+        
+        /**
+         * Tokenizes CSS source
+         * @param {String} source
+         * @returns {Array}
+         */
+        parse: function(source) {
+        	// transform tokens
+	 		var pos = 0;
+	 		return _.map(this.lex(source), function(token) {
+	 			if (token.type == 'line') {
+	 				token.value = getNewline(source, pos);
+	 			}
+	 			
+	 			return {
+	 				type: token.type,
+	 				start: pos,
+	 				end: (pos += token.value.length)
+	 			};
+			});
+		},
+        
         toSource: function (toks) {
             var i = 0, max = toks.length, t, src = '';
             for (; i < max; i += 1) {
@@ -4946,957 +5982,1182 @@ var walker, tokens = [], isOp, isNameChar, isDigit;
             return src;
         }
     };
-});/* This file defines an XML parser, with a few kludges to make it
- * usable for HTML. autoSelfClosers defines a set of tag names that
- * are expected to not have a closing tag, and doNotIndent specifies
- * the tags inside of which no indentation should happen (see Config
- * object). These can be disabled by passing the editor an object like
- * {useHTMLKludges: false} as parserConfig option.
- * 
- * Original code by Marijn Haverbeke
- * from CodeMirror project: http://codemirror.net/
- */
-zen_coding.define('xmlParser', function(require, _) {
-	// The value used to signal the end of a sequence in
-	// iterators.
-	var StopIteration = {
-		toString : function() {
-			return "StopIteration";
-		}
-	};
-
-	// Apply a function to each element in a sequence.
-	function forEach(iter, f) {
-		if (iter.next) {
-			try {
-				while (true)
-					f(iter.next());
-			} catch (e) {
-				if (e != StopIteration)
-					throw e;
-			}
-		} else {
-			for ( var i = 0; i < iter.length; i++)
-				f(iter[i]);
-		}
-	}
-
-	// A framework for simple tokenizers. Takes care of newlines
-	// and
-	// white-space, and of getting the text from the source
-	// stream into
-	// the token object. A state is a function of two arguments
-	// -- a
-	// string stream and a setState function. The second can be
-	// used to
-	// change the tokenizer's state, and can be ignored for
-	// stateless
-	// tokenizers. This function should advance the stream over
-	// a token
-	// and return a string or object containing information
-	// about the next
-	// token, or null to pass and have the (new) state be called
-	// to finish
-	// the token. When a string is given, it is wrapped in a
-	// {style, type}
-	// object. In the resulting object, the characters consumed
-	// are stored
-	// under the content property. Any whitespace following them
-	// is also
-	// automatically consumed, and added to the value property.
-	// (Thus,
-	// content is the actual meaningful part of the token, while
-	// value
-	// contains all the text it spans.)
-
-	function tokenizer(source, state) {
-		// Newlines are always a separate token.
-		function isWhiteSpace(ch) {
-			// The messy regexp is because IE's regexp matcher
-			// is of the
-			// opinion that non-breaking spaces are no
-			// whitespace.
-			return ch != "\n" && /^[\s\u00a0]*$/.test(ch);
-		}
-
-		var tokenizer = {
-			state : state,
-
-			take : function(type) {
-				if (typeof (type) == "string")
-					type = {
-						style : type,
-						type : type
-					};
-
-				type.content = (type.content || "")
-						+ source.get();
-				if (!/\n$/.test(type.content))
-					source.nextWhile(isWhiteSpace);
-				type.value = type.content + source.get();
-				return type;
-			},
-
-			next : function() {
-				if (!source.more())
-					throw StopIteration;
-
-				var type;
-				if (source.equals("\n")) {
-					source.next();
-					return this.take("whitespace");
-				}
-
-				if (source.applies(isWhiteSpace))
-					type = "whitespace";
-				else
-					while (!type)
-						type = this.state(source, function(s) {
-							tokenizer.state = s;
-						});
-
-				return this.take(type);
-			}
-		};
-		return tokenizer;
-	}
-
-	/*
-	 * String streams are the things fed to parsers (which can
-	 * feed them to a tokenizer if they want). They provide peek
-	 * and next methods for looking at the current character
-	 * (next 'consumes' this character, peek does not), and a
-	 * get method for retrieving all the text that was consumed
-	 * since the last time get was called.
-	 * 
-	 * An easy mistake to make is to let a StopIteration
-	 * exception finish the token stream while there are still
-	 * characters pending in the string stream (hitting the end
-	 * of the buffer while parsing a token). To make it easier
-	 * to detect such errors, the stringstreams throw an
-	 * exception when this happens.
-	 */
-
-	// Make a stringstream stream out of an iterator that
-	// returns strings.
-	// This is applied to the result of traverseDOM (see
-	// codemirror.js),
-	// and the resulting stream is fed to the parser.
-	var stringStream = function(source) {
-		// String that's currently being iterated over.
-		var current = "";
-		// Position in that string.
-		var pos = 0;
-		// Accumulator for strings that have been iterated over
-		// but not
-		// get()-ed yet.
-		var accum = "";
-
-		// ZC fix: if we've passed a string, wrap it with
-		// traverseDOM-like interface
-		if (typeof source == 'string') {
-			var _source = source, _fed = false;
-			source = {
-				next : function() {
-					if (!_fed) {
-						_fed = true;
-						return _source;
-					} else {
-						throw StopIteration;
-					}
-				}
-			};
-		}
-
-		// Make sure there are more characters ready, or throw
-		// StopIteration.
-		function ensureChars() {
-			while (pos == current.length) {
-				accum += current;
-				current = ""; // In case source.next() throws
-				pos = 0;
-				try {
-					current = source.next();
-				} catch (e) {
-					if (e != StopIteration)
-						throw e;
-					else
-						return false;
-				}
-			}
-			return true;
-		}
-
-		return {
-			// peek: -> character
-			// Return the next character in the stream.
-			peek : function() {
-				if (!ensureChars())
-					return null;
-				return current.charAt(pos);
-			},
-			// next: -> character
-			// Get the next character, throw StopIteration if at
-			// end, check
-			// for unused content.
-			next : function() {
-				if (!ensureChars()) {
-					if (accum.length > 0)
-						throw "End of stringstream reached without emptying buffer ('"
-								+ accum + "').";
-					else
-						throw StopIteration;
-				}
-				return current.charAt(pos++);
-			},
-			// get(): -> string
-			// Return the characters iterated over since the
-			// last call to
-			// .get().
-			get : function() {
-				var temp = accum;
-				accum = "";
-				if (pos > 0) {
-					temp += current.slice(0, pos);
-					current = current.slice(pos);
-					pos = 0;
-				}
-				return temp;
-			},
-			// Push a string back into the stream.
-			push : function(str) {
-				current = current.slice(0, pos) + str
-						+ current.slice(pos);
-			},
-			lookAhead : function(str, consume, skipSpaces,
-					caseInsensitive) {
-				function cased(str) {
-					return caseInsensitive ? str.toLowerCase()
-							: str;
-				}
-				str = cased(str);
-				var found = false;
-
-				var _accum = accum, _pos = pos;
-				if (skipSpaces)
-					this.nextWhileMatches(/[\s\u00a0]/);
-
-				while (true) {
-					var end = pos + str.length, left = current.length
-							- pos;
-					if (end <= current.length) {
-						found = str == cased(current.slice(pos,
-								end));
-						pos = end;
-						break;
-					} else if (str.slice(0, left) == cased(current
-							.slice(pos))) {
-						accum += current;
-						current = "";
-						try {
-							current = source.next();
-						} catch (e) {
-							if (e != StopIteration)
-								throw e;
-							break;
-						}
-						pos = 0;
-						str = str.slice(left);
-					} else {
-						break;
-					}
-				}
-
-				if (!(found && consume)) {
-					current = accum.slice(_accum.length)
-							+ current;
-					pos = _pos;
-					accum = _accum;
-				}
-
-				return found;
-			},
-			// Wont't match past end of line.
-			lookAheadRegex : function(regex, consume) {
-				if (regex.source.charAt(0) != "^")
-					throw new Error(
-							"Regexps passed to lookAheadRegex must start with ^");
-
-				// Fetch the rest of the line
-				while (current.indexOf("\n", pos) == -1) {
-					try {
-						current += source.next();
-					} catch (e) {
-						if (e != StopIteration)
-							throw e;
-						break;
-					}
-				}
-				var matched = current.slice(pos).match(regex);
-				if (matched && consume)
-					pos += matched[0].length;
-				return matched;
-			},
-
-			// Utils built on top of the above
-			// more: -> boolean
-			// Produce true if the stream isn't empty.
-			more : function() {
-				return this.peek() !== null;
-			},
-			applies : function(test) {
-				var next = this.peek();
-				return (next !== null && test(next));
-			},
-			nextWhile : function(test) {
-				var next;
-				while ((next = this.peek()) !== null
-						&& test(next))
-					this.next();
-			},
-			matches : function(re) {
-				var next = this.peek();
-				return (next !== null && re.test(next));
-			},
-			nextWhileMatches : function(re) {
-				var next;
-				while ((next = this.peek()) !== null
-						&& re.test(next))
-					this.next();
-			},
-			equals : function(ch) {
-				return ch === this.peek();
-			},
-			endOfLine : function() {
-				var next = this.peek();
-				return next == null || next == "\n";
-			}
-		};
-	};
-
-	var Kludges = {
-		autoSelfClosers : {
-			"br" : true,
-			"img" : true,
-			"hr" : true,
-			"link" : true,
-			"input" : true,
-			"meta" : true,
-			"col" : true,
-			"frame" : true,
-			"base" : true,
-			"area" : true
-		},
-		doNotIndent : {
-			"pre" : true,
-			"!cdata" : true
-		}
-	};
-	var NoKludges = {
-		autoSelfClosers : {},
-		doNotIndent : {
-			"!cdata" : true
-		}
-	};
-	var UseKludges = Kludges;
-	var alignCDATA = false;
-
-	// Simple stateful tokenizer for XML documents. Returns a
-	// MochiKit-style iterator, with a state property that
-	// contains a
-	// function encapsulating the current state. See
-	// tokenize.js.
-	var tokenizeXML = (function() {
-		function inText(source, setState) {
-			var ch = source.next();
-			if (ch == "<") {
-				if (source.equals("!")) {
-					source.next();
-					if (source.equals("[")) {
-						if (source.lookAhead("[CDATA[", true)) {
-							setState(inBlock("xml-cdata", "]]>"));
-							return null;
-						} else {
-							return "xml-text";
-						}
-					} else if (source.lookAhead("--", true)) {
-						setState(inBlock("xml-comment", "-->"));
-						return null;
-					} else if (source
-							.lookAhead("DOCTYPE", true)) {
-						source.nextWhileMatches(/[\w\._\-]/);
-						setState(inBlock("xml-doctype", ">"));
-						return "xml-doctype";
-					} else {
-						return "xml-text";
-					}
-				} else if (source.equals("?")) {
-					source.next();
-					source.nextWhileMatches(/[\w\._\-]/);
-					setState(inBlock("xml-processing", "?>"));
-					return "xml-processing";
-				} else {
-					if (source.equals("/"))
-						source.next();
-					setState(inTag);
-					return "xml-punctuation";
-				}
-			} else if (ch == "&") {
-				while (!source.endOfLine()) {
-					if (source.next() == ";")
-						break;
-				}
-				return "xml-entity";
-			} else {
-				source.nextWhileMatches(/[^&<\n]/);
-				return "xml-text";
-			}
-		}
-
-		function inTag(source, setState) {
-			var ch = source.next();
-			if (ch == ">") {
-				setState(inText);
-				return "xml-punctuation";
-			} else if (/[?\/]/.test(ch) && source.equals(">")) {
-				source.next();
-				setState(inText);
-				return "xml-punctuation";
-			} else if (ch == "=") {
-				return "xml-punctuation";
-			} else if (/[\'\"]/.test(ch)) {
-				setState(inAttribute(ch));
-				return null;
-			} else {
-				source
-						.nextWhileMatches(/[^\s\u00a0=<>\"\'\/?]/);
-				return "xml-name";
-			}
-		}
-
-		function inAttribute(quote) {
-			return function(source, setState) {
-				while (!source.endOfLine()) {
-					if (source.next() == quote) {
-						setState(inTag);
-						break;
-					}
-				}
-				return "xml-attribute";
-			};
-		}
-
-		function inBlock(style, terminator) {
-			return function(source, setState) {
-				while (!source.endOfLine()) {
-					if (source.lookAhead(terminator, true)) {
-						setState(inText);
-						break;
-					}
-					source.next();
-				}
-				return style;
-			};
-		}
-
-		return function(source, startState) {
-			return tokenizer(source, startState || inText);
-		};
-	})();
-
-	// The parser. The structure of this function largely
-	// follows that of
-	// parseJavaScript in parsejavascript.js (there is actually
-	// a bit more
-	// shared code than I'd like), but it is quite a bit
-	// simpler.
-	function parseXML(source) {
-		var tokens = tokenizeXML(source), token;
-		var cc = [ base ];
-		var tokenNr = 0, indented = 0;
-		var currentTag = null, context = null;
-		var consume;
-
-		function push(fs) {
-			for ( var i = fs.length - 1; i >= 0; i--)
-				cc.push(fs[i]);
-		}
-		function cont() {
-			push(arguments);
-			consume = true;
-		}
-		function pass() {
-			push(arguments);
-			consume = false;
-		}
-
-		function markErr() {
-			token.style += " xml-error";
-		}
-		function expect(text) {
-			return function(style, content) {
-				if (content == text)
-					cont();
-				else {
-					markErr();
-					cont(arguments.callee);
-				}
-			};
-		}
-
-		function pushContext(tagname, startOfLine) {
-			var noIndent = UseKludges.doNotIndent
-					.hasOwnProperty(tagname)
-					|| (context && context.noIndent);
-			context = {
-				prev : context,
-				name : tagname,
-				indent : indented,
-				startOfLine : startOfLine,
-				noIndent : noIndent
-			};
-		}
-		function popContext() {
-			context = context.prev;
-		}
-		function computeIndentation(baseContext) {
-			return function(nextChars, current) {
-				var context = baseContext;
-				if (context && context.noIndent)
-					return current;
-				if (alignCDATA && /<!\[CDATA\[/.test(nextChars))
-					return 0;
-				if (context && /^<\//.test(nextChars))
-					context = context.prev;
-				while (context && !context.startOfLine)
-					context = context.prev;
-				if (context)
-					return context.indent + indentUnit;
-				else
-					return 0;
-			};
-		}
-
-		function base() {
-			return pass(element, base);
-		}
-		var harmlessTokens = {
-			"xml-text" : true,
-			"xml-entity" : true,
-			"xml-comment" : true,
-			"xml-processing" : true,
-			"xml-doctype" : true
-		};
-		function element(style, content) {
-			if (content == "<")
-				cont(tagname, attributes, endtag(tokenNr == 1));
-			else if (content == "</")
-				cont(closetagname, expect(">"));
-			else if (style == "xml-cdata") {
-				if (!context || context.name != "!cdata")
-					pushContext("!cdata");
-				if (/\]\]>$/.test(content))
-					popContext();
-				cont();
-			} else if (harmlessTokens.hasOwnProperty(style))
-				cont();
-			else {
-				markErr();
-				cont();
-			}
-		}
-		function tagname(style, content) {
-			if (style == "xml-name") {
-				currentTag = content.toLowerCase();
-				token.style = "xml-tagname";
-				cont();
-			} else {
-				currentTag = null;
-				pass();
-			}
-		}
-		function closetagname(style, content) {
-			if (style == "xml-name") {
-				token.style = "xml-tagname";
-				if (context
-						&& content.toLowerCase() == context.name)
-					popContext();
-				else
-					markErr();
-			}
-			cont();
-		}
-		function endtag(startOfLine) {
-			return function(style, content) {
-				if (content == "/>"
-						|| (content == ">" && UseKludges.autoSelfClosers
-								.hasOwnProperty(currentTag)))
-					cont();
-				else if (content == ">") {
-					pushContext(currentTag, startOfLine);
-					cont();
-				} else {
-					markErr();
-					cont(arguments.callee);
-				}
-			};
-		}
-		function attributes(style) {
-			if (style == "xml-name") {
-				token.style = "xml-attname";
-				cont(attribute, attributes);
-			} else
-				pass();
-		}
-		function attribute(style, content) {
-			if (content == "=")
-				cont(value);
-			else if (content == ">" || content == "/>")
-				pass(endtag);
-			else
-				pass();
-		}
-		function value(style) {
-			if (style == "xml-attribute")
-				cont(value);
-			else
-				pass();
-		}
-
-		return {
-			indentation : function() {
-				return indented;
-			},
-
-			next : function() {
-				token = tokens.next();
-				if (token.style == "whitespace" && tokenNr == 0)
-					indented = token.value.length;
-				else
-					tokenNr++;
-				if (token.content == "\n") {
-					indented = tokenNr = 0;
-					token.indentation = computeIndentation(context);
-				}
-
-				if (token.style == "whitespace"
-						|| token.type == "xml-comment")
-					return token;
-
-				while (true) {
-					consume = false;
-					cc.pop()(token.style, token.content);
-					if (consume)
-						return token;
-				}
-			},
-
-			copy : function() {
-				var _cc = cc.concat([]), _tokenState = tokens.state, _context = context;
-				var parser = this;
-
-				return function(input) {
-					cc = _cc.concat([]);
-					tokenNr = indented = 0;
-					context = _context;
-					tokens = tokenizeXML(input, _tokenState);
-					return parser;
-				};
-			}
-		};
-	}
-
-  return {
-    make: function(stream) {
-    	if (typeof stream == 'string')
-    		stream = stringStream(stream);
-    		
-    	return parseXML(stream);
-    }
-  };
-});
-/**
- * Some utility functions for CSS parser:
- * -- optimizes CSS lexer token, produced by Stoyan Stefanov's CSSEX parser,
- *    for Zen Coding needs
- * -- extracts full CSS rule (selector + style rules) from content
- *  
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
+});/**
+ * HTML tokenizer by Marijn Haverbeke
+ * http://codemirror.net/
+ * @constructor
+ * @memberOf __xmlParseDefine
  * @param {Function} require
  * @param {Underscore} _
  */
-zen_coding.define('parserUtils', function(require, _) {
-	var css_stop_chars = '{}/\\<>';
-	
-	function isStopChar(token) {
-		var stop_chars = '{};:';
-		return stop_chars.indexOf(token.type) != -1;
-	}
-	
-	/**
-	 * Calculates newline width at specified position in content
-	 * @param {String} content
-	 * @param {Number} pos
-	 * @return {Number}
-	 */
-	function calculateNlLength(content, pos) {
-		return content.charAt(pos) == '\r' && content.charAt(pos + 1) == '\n' ? 2 : 1;
-	}
-	
-	/**
-	 * Post-process optimized tokens: collapse tokens for complex values
-	 * @param {Array} optimized Optimized tokens
-	 * @param {Array} original Original preprocessed tokens 
-	 */
-	function postProcessOptimized(optimized, original) {
-		var token, child;
-		_.each(optimized, function(token, i) {
-			if (token.type == 'value') {
-				token.children = [];
-				child = null;
-				
-				var subtokenStart = token.ref_start_ix;
-				
-				while (subtokenStart <= token.ref_end_ix) {
-					var subtoken = original[subtokenStart];
-					if (subtoken.type != 'white') {
-						if (!child)
-							child = [subtoken.start, subtoken.end];
-						else
-							child[1] = subtoken.end;
-					} else if (child) {
-						token.children.push(child);
-						child = null;
-					}
-					
-					subtokenStart++;	
-				}
-				
-				if (child) // push last token
-					token.children.push(child);
+zen_coding.define('xmlParser', function(require, _) {
+	var Kludges = {
+		autoSelfClosers : {},
+		implicitlyClosed : {},
+		contextGrabbers : {},
+		doNotIndent : {},
+		allowUnquoted : true,
+		allowMissing : true
+	};
+
+	// Return variables for tokenizers
+	var tagName = null, type = null;
+
+	function inText(stream, state) {
+		function chain(parser) {
+			state.tokenize = parser;
+			return parser(stream, state);
+		}
+
+		var ch = stream.next();
+		if (ch == "<") {
+			if (stream.eat("!")) {
+				if (stream.eat("[")) {
+					if (stream.match("CDATA["))
+						return chain(inBlock("atom", "]]>"));
+					else
+						return null;
+				} else if (stream.match("--"))
+					return chain(inBlock("comment", "-->"));
+				else if (stream.match("DOCTYPE", true, true)) {
+					stream.eatWhile(/[\w\._\-]/);
+					return chain(doctype(1));
+				} else
+					return null;
+			} else if (stream.eat("?")) {
+				stream.eatWhile(/[\w\._\-]/);
+				state.tokenize = inBlock("meta", "?>");
+				return "meta";
+			} else {
+				type = stream.eat("/") ? "closeTag" : "openTag";
+				stream.eatSpace();
+				tagName = "";
+				var c;
+				while ((c = stream.eat(/[^\s\u00a0=<>\"\'\/?]/)))
+					tagName += c;
+				state.tokenize = inTag;
+				return "tag";
 			}
-		});
-		
-		return optimized;
+		} else if (ch == "&") {
+			var ok;
+			if (stream.eat("#")) {
+				if (stream.eat("x")) {
+					ok = stream.eatWhile(/[a-fA-F\d]/) && stream.eat(";");
+				} else {
+					ok = stream.eatWhile(/[\d]/) && stream.eat(";");
+				}
+			} else {
+				ok = stream.eatWhile(/[\w\.\-:]/) && stream.eat(";");
+			}
+			return ok ? "atom" : "error";
+		} else {
+			stream.eatWhile(/[^&<]/);
+			return "text";
+		}
 	}
-	
-	function makeToken(type, value, pos, ix) {
-		value = value || '';
-		return {
-			/** @memberOf syntaxToken */
-			type: type || '',
-			content: value,
-			start: pos,
-			end: pos + value.length,
-			/** Reference token index that starts current token */
-			ref_start_ix: ix,
-			/** Reference token index that ends current token */
-			ref_end_ix: ix
+
+	function inTag(stream, state) {
+		var ch = stream.next();
+		if (ch == ">" || (ch == "/" && stream.eat(">"))) {
+			state.tokenize = inText;
+			type = ch == ">" ? "endTag" : "selfcloseTag";
+			return "tag";
+		} else if (ch == "=") {
+			type = "equals";
+			return null;
+		} else if (/[\'\"]/.test(ch)) {
+			state.tokenize = inAttribute(ch);
+			return state.tokenize(stream, state);
+		} else {
+			stream.eatWhile(/[^\s\u00a0=<>\"\'\/?]/);
+			return "word";
+		}
+	}
+
+	function inAttribute(quote) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.next() == quote) {
+					state.tokenize = inTag;
+					break;
+				}
+			}
+			return "string";
+		};
+	}
+
+	function inBlock(style, terminator) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.match(terminator)) {
+					state.tokenize = inText;
+					break;
+				}
+				stream.next();
+			}
+			return style;
 		};
 	}
 	
-	function CSSTreeNode(token) {
- 		this.start_token = token;
- 		this.end_token = null;
+	function doctype(depth) {
+		return function(stream, state) {
+			var ch;
+			while ((ch = stream.next()) != null) {
+				if (ch == "<") {
+					state.tokenize = doctype(depth + 1);
+					return state.tokenize(stream, state);
+				} else if (ch == ">") {
+					if (depth == 1) {
+						state.tokenize = inText;
+						break;
+					} else {
+						state.tokenize = doctype(depth - 1);
+						return state.tokenize(stream, state);
+					}
+				}
+			}
+			return "meta";
+		};
+	}
+
+	var curState = null, setStyle;
+	function pass() {
+		for (var i = arguments.length - 1; i >= 0; i--)
+			curState.cc.push(arguments[i]);
+	}
+	
+	function cont() {
+		pass.apply(null, arguments);
+		return true;
+	}
+
+	function pushContext(tagName, startOfLine) {
+		var noIndent = Kludges.doNotIndent.hasOwnProperty(tagName) 
+			|| (curState.context && curState.context.noIndent);
+		curState.context = {
+			prev : curState.context,
+			tagName : tagName,
+			indent : curState.indented,
+			startOfLine : startOfLine,
+			noIndent : noIndent
+		};
+	}
+	
+	function popContext() {
+		if (curState.context)
+			curState.context = curState.context.prev;
+	}
+
+	function element(type) {
+		if (type == "openTag") {
+			curState.tagName = tagName;
+			return cont(attributes, endtag(curState.startOfLine));
+		} else if (type == "closeTag") {
+			var err = false;
+			if (curState.context) {
+				if (curState.context.tagName != tagName) {
+					if (Kludges.implicitlyClosed.hasOwnProperty(curState.context.tagName.toLowerCase())) {
+						popContext();
+					}
+					err = !curState.context || curState.context.tagName != tagName;
+				}
+			} else {
+				err = true;
+			}
+			
+			if (err)
+				setStyle = "error";
+			return cont(endclosetag(err));
+		}
+		return cont();
+	}
+	
+	function endtag(startOfLine) {
+		return function(type) {
+			if (type == "selfcloseTag"
+					|| (type == "endTag" && Kludges.autoSelfClosers
+							.hasOwnProperty(curState.tagName
+									.toLowerCase()))) {
+				maybePopContext(curState.tagName.toLowerCase());
+				return cont();
+			}
+			if (type == "endTag") {
+				maybePopContext(curState.tagName.toLowerCase());
+				pushContext(curState.tagName, startOfLine);
+				return cont();
+			}
+			return cont();
+		};
+	}
+	
+	function endclosetag(err) {
+		return function(type) {
+			if (err)
+				setStyle = "error";
+			if (type == "endTag") {
+				popContext();
+				return cont();
+			}
+			setStyle = "error";
+			return cont(arguments.callee);
+		};
+	}
+	
+	function maybePopContext(nextTagName) {
+		var parentTagName;
+		while (true) {
+			if (!curState.context) {
+				return;
+			}
+			parentTagName = curState.context.tagName.toLowerCase();
+			if (!Kludges.contextGrabbers.hasOwnProperty(parentTagName)
+					|| !Kludges.contextGrabbers[parentTagName].hasOwnProperty(nextTagName)) {
+				return;
+			}
+			popContext();
+		}
+	}
+
+	function attributes(type) {
+		if (type == "word") {
+			setStyle = "attribute";
+			return cont(attribute, attributes);
+		}
+		if (type == "endTag" || type == "selfcloseTag")
+			return pass();
+		setStyle = "error";
+		return cont(attributes);
+	}
+	
+	function attribute(type) {
+		if (type == "equals")
+			return cont(attvalue, attributes);
+		if (!Kludges.allowMissing)
+			setStyle = "error";
+		return (type == "endTag" || type == "selfcloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvalue(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		if (type == "word" && Kludges.allowUnquoted) {
+			setStyle = "string";
+			return cont();
+		}
+		setStyle = "error";
+		return (type == "endTag" || type == "selfCloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvaluemaybe(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		else
+			return pass();
+	}
+	
+	function startState() {
+		return {
+			tokenize : inText,
+			cc : [],
+			indented : 0,
+			startOfLine : true,
+			tagName : null,
+			context : null
+		};
+	}
+	
+	function token(stream, state) {
+		if (stream.sol()) {
+			state.startOfLine = true;
+			state.indented = 0;
+		}
+		
+		if (stream.eatSpace())
+			return null;
+
+		setStyle = type = tagName = null;
+		var style = state.tokenize(stream, state);
+		state.type = type;
+		if ((style || type) && style != "comment") {
+			curState = state;
+			while (true) {
+				var comb = state.cc.pop() || element;
+				if (comb(type || style))
+					break;
+			}
+		}
+		state.startOfLine = false;
+		return setStyle || style;
+	}
+
+	return {
+		/**
+		 * @memberOf zen_coding.xmlParser
+		 * @returns
+		 */
+		parse: function(data, offset) {
+			offset = offset || 0;
+			var state = startState();
+			var stream = require('stringStream').create(data);
+			var tokens = [];
+			while (!stream.eol()) {
+				tokens.push({
+					type: token(stream, state),
+					start: stream.start + offset,
+					end: stream.pos + offset
+				});
+				stream.start = stream.pos;
+			}
+			
+			return tokens;
+		}		
+	};
+});
+/**
+ * Abstract implementation of edit tree interface.
+ * Edit tree is a named container of editable “name-value” child elements, 
+ * parsed from <code>source</code>. This container provides convenient methods
+ * for editing/adding/removing child elements. All these update actions are
+ * instantly reflected in the <code>source</code> code with respect of formatting.
+ * <br><br>
+ * For example, developer can create an edit tree from CSS rule and add or 
+ * remove properties from it–all changes will be immediately reflected in the 
+ * original source.
+ * <br><br>
+ * All classes defined in this module should be extended the same way as in
+ * Backbone framework: using <code>extend</code> method to create new class and 
+ * <code>initialize</code> method to define custom class constructor.
+ * 
+ * @example
+ * <pre><code>
+ * var MyClass = require('editTree').EditElement.extend({
+ * 	initialize: function() {
+ * 		// constructor code here
+ * 	}
+ * });
+ * 
+ * var elem = new MyClass(); 
+ * </code></pre>
+ * 
+ * 
+ * @param {Function} require
+ * @param {Underscore} _
+ * @constructor
+ * @memberOf __editTreeDefine
+ */
+zen_coding.define('editTree', function(require, _, core) {
+	var range = require('range').create;
+	
+	/**
+	 * Named container of edited source
+	 * @type EditContainer
+	 * @param {String} source
+	 * @param {Object} options
+	 */
+	function EditContainer(source, options) {
+		this.options = _.extend({offset: 0}, options);
+		/**
+		 * Source code of edited structure. All changes in the structure are 
+		 * immediately reflected into this property
+		 */
+		this.source = source;
+		
+		/** 
+		 * List of all editable children
+		 * @private 
+		 */
+		this._children = [];
+		
+		/**
+		 * Hash of all positions of container
+		 * @private
+		 */
+		this._positions = {
+			name: 0
+		};
+		
+		this.initialize.apply(this, arguments);
+	}
+	
+	/**
+	 * The self-propagating extend function for classes.
+	 * @type Function
+	 */
+	EditContainer.extend = core.extend;
+	
+	EditContainer.prototype = {
+		/**
+		 * Child class constructor
+		 */
+		initialize: function() {},
+		
+		/**
+		 * Replace substring of tag's source
+		 * @param {String} value
+		 * @param {Number} start
+		 * @param {Number} end
+		 * @private
+		 */
+		_updateSource: function(value, start, end) {
+			// create modification range
+			var r = range(start, _.isUndefined(end) ? 0 : end - start);
+			var delta = value.length - r.length();
+			
+			var update = function(obj) {
+				_.each(obj, function(v, k) {
+					if (v >= r.end)
+						obj[k] += delta;
+				});
+			};
+			
+			// update affected positions of current container
+			update(this._positions);
+			
+			// update affected positions of children
+			_.each(this.list(), function(item) {
+				update(item._positions);
+			});
+			
+			this.source = require('utils').replaceSubstring(this.source, value, r);
+		},
+			
+			
+		/**
+		 * Adds new attribute 
+		 * @param {String} name Property name
+		 * @param {String} value Property value
+		 * @param {Number} pos Position at which to insert new property. By 
+		 * default the property is inserted at the end of rule 
+		 * @returns {EditElement} Newly created element
+		 */
+		add: function(name, value, pos) {
+			// this is abstract implementation
+			var item = new EditElement(name, value);
+			this._children.push(item);
+			return item;
+		},
+		
+		/**
+		 * Returns attribute object
+		 * @param {String} name Attribute name or its index
+		 * @returns {EditElement}
+		 */
+		get: function(name) {
+			if (_.isNumber(name))
+				return this.list()[name];
+			
+			if (_.isString(name))
+				return _.find(this.list(), function(prop) {
+					return prop.name() === name;
+				});
+			
+			return name;
+		},
+		
+		/**
+		 * Returns all children by name or indexes
+		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
+		 * <code>Array</code>, <code>Number</code>)
+		 * @returns {Array}
+		 */
+		getAll: function(name) {
+			if (!_.isArray(name))
+				name = [name];
+			
+			// split names and indexes
+			var names = [], indexes = [];
+			_.each(name, function(item) {
+				if (_.isString(item))
+					names.push(item);
+				else if (_.isNumber(item))
+					indexes.push(item);
+			});
+			
+			return _.filter(this.list(), function(attribute, i) {
+				return _.include(indexes, i) || _.include(names, attribute.name());
+			});
+		},
+		
+		/**
+		 * Returns or updates element value. If such element doesn't exists,
+		 * it will be created automatically and added at the end of child list.
+		 * @param {String} name Element name or its index
+		 * @param {String} value New element value
+		 * @returns {String}
+		 */
+		value: function(name, value, pos) {
+			var element = this.get(name);
+			if (element)
+				return element.value(value);
+			
+			if (!_.isUndefined(value)) {
+				// no such element — create it
+				return this.add(name, value, pos);
+			}
+		},
+		
+		/**
+		 * Returns all values of child elements found by <code>getAll()</code>
+		 * method
+		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
+		 * <code>Array</code>, <code>Number</code>)
+		 * @returns {Array}
+		 */
+		values: function(name) {
+			return _.map(this.getAll(name), function(element) {
+				return element.value();
+			});
+		},
+		
+		/**
+		 * Remove child element
+		 * @param {String} name Property name or its index
+		 */
+		remove: function(name) {
+			var element = this.get(name);
+			if (element) {
+				this._updateSource('', element.fullRange());
+				this._children = _.without(this._children, element);
+			}
+		},
+		
+		/**
+		 * Returns list of all editable child elements
+		 * @returns {Array}
+		 */
+		list: function() {
+			return this._children;
+		},
+		
+		/**
+		 * Returns index of editble child in list
+		 * @param {Object} item
+		 * @returns {Number}
+		 */
+		indexOf: function(item) {
+			return _.indexOf(this.list(), this.get(item));
+		},
+		
+		/**
+		 * Sets or gets container name
+		 * @param {String} val New name. If not passed, current 
+		 * name is returned
+		 * @return {String}
+		 */
+		name: function(val) {
+			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
+				this._updateSource(val, this._positions.name, this._positions.name + this._name.length);
+				this._name = val;
+			}
+			
+			return this._name;
+		},
+		
+		/**
+		 * Returns name range object
+		 * @param {Boolean} isAbsolute Return absolute range (with respect of 
+		 * rule offset)
+		 * @returns {Range}
+		 */
+		nameRange: function(isAbsolute) {
+			return range(this._positions.name + (isAbsolute ? this.options.offset : 0), this.name());
+		},
+		
+		/**
+		 * Returns range of current source
+		 * @param {Boolean} isAbsolute
+		 */
+		range: function(isAbsolute) {
+			return range(isAbsolute ? this.options.offset : 0, this.toString());
+		},
+		
+		/**
+		 * Returns element that belongs to specified position
+		 * @param {Number} pos
+		 * @param {Boolean} isAbsolute
+		 * @returns {EditElement}
+		 */
+		itemFromPosition: function(pos, isAbsolute) {
+			return _.find(this.list(), function(elem) {
+				return elem.range(isAbsolute).inside(pos);
+			});
+		},
+		
+		/**
+		 * Returns source code of current container 
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this.source;
+		}
+	};
+	
+	/**
+	 * @param {EditContainer} parent
+	 * @param {Object} nameToken
+	 * @param {Object} valueToken
+	 */
+	function EditElement(parent, nameToken, valueToken) {
+		/** @type EditContainer */
+		this.parent = parent;
+		
+		this._name = nameToken.value;
+		this._value = valueToken ? valueToken.value : '';
+		
+		this._positions = {
+			name: nameToken.start,
+			value: valueToken ? valueToken.start : -1
+		};
+		
+		this.initialize.apply(this, arguments);
+	}
+	
+	/**
+	 * The self-propagating extend function for classes.
+	 * @type Function
+	 */
+	EditElement.extend = core.extend;
+	
+	EditElement.prototype = {
+		/**
+		 * Child class constructor
+		 */
+		initialize: function() {},
+		
+		/**
+		 * Make position absolute
+		 * @private
+		 * @param {Number} num
+		 * @param {Boolean} isAbsolute
+		 * @returns {Boolean}
+		 */
+		_pos: function(num, isAbsolute) {
+			return num + (isAbsolute ? this.parent.options.offset : 0);
+		},
+			
+		/**
+		 * Sets of gets element value
+		 * @param {String} val New element value. If not passed, current 
+		 * value is returned
+		 * @returns {String}
+		 */
+		value: function(val) {
+			if (!_.isUndefined(val) && this._value !== (val = String(val))) {
+				this.parent._updateSource(val, this.valueRange());
+				this._value = val;
+			}
+			
+			return this._value;
+		},
+		
+		/**
+		 * Sets of gets element name
+		 * @param {String} val New element name. If not passed, current 
+		 * name is returned
+		 * @returns {String}
+		 */
+		name: function(val) {
+			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
+				this.parent._updateSource(val, this.nameRange());
+				this._name = val;
+			}
+			
+			return this._name;
+		},
+		
+		/**
+		 * Returns position of element name token
+		 * @param {Boolean} isAbsolute Return absolute position
+		 * @returns {Number}
+		 */
+		namePosition: function(isAbsolute) {
+			return this._pos(this._positions.name, isAbsolute);
+		},
+		
+		/**
+		 * Returns position of element value token
+		 * @param {Boolean} isAbsolute Return absolute position
+		 * @returns {Number}
+		 */
+		valuePosition: function(isAbsolute) {
+			return this._pos(this._positions.value, isAbsolute);
+		},
+		
+		/**
+		 * Returns element name
+		 * @param {Boolean} isAbsolute Return absolute range 
+		 * @returns {Range}
+		 */
+		range: function(isAbsolute) {
+			return range(this.namePosition(isAbsolute), this.toString());
+		},
+		
+		/**
+		 * Returns full element range, including possible indentation
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		fullRange: function(isAbsolute) {
+			return this.range(isAbsolute);
+		},
+		
+		/**
+		 * Returns element name range
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		nameRange: function(isAbsolute) {
+			return range(this.namePosition(isAbsolute), this.name());
+		},
+		
+		/**
+		 * Returns element value range
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		valueRange: function(isAbsolute) {
+			return range(this.valuePosition(isAbsolute), this.value());
+		},
+		
+		/**
+		 * Returns current element string representation
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this.name() + this.value();
+		},
+		
+		valueOf: function() {
+			return this.toString();
+		}
+	};
+	
+	return {
+		EditContainer: EditContainer,
+		EditElement: EditElement,
+		
+		/**
+		 * Creates token that can be fed to <code>EditElement</code>
+		 * @param {Number} start
+		 * @param {String} value
+		 * @param {String} type
+		 * @returns
+		 */
+		createToken: function(start, value, type) {
+			var obj = {
+				start: start || 0,
+				value: value || '',
+				type: type
+			};
+			
+			obj.end = obj.start + obj.value.length;
+			return obj;
+		}
+	};
+});/**
+ * CSS EditTree is a module that can parse a CSS rule into a tree with 
+ * convenient methods for adding, modifying and removing CSS properties. These 
+ * changes can be written back to string with respect of code formatting.
+ * 
+ * @memberOf __cssEditTreeDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.define('cssEditTree', function(require, _) {
+	var defaultOptions = {
+		styleBefore: '\n\t',
+		styleSeparator: ': ',
+		offset: 0
+	};
+	
+	var WHITESPACE_REMOVE_FROM_START = 1;
+	var WHITESPACE_REMOVE_FROM_END   = 2;
+	
+	/**
+	 * Returns range object
+	 * @param {Number} start
+	 * @param {Number} len 
+	 * @returns {Range}
+	 */
+	function range(start, len) {
+		return require('range').create(start, len);
+	}
+	
+	/**
+	 * Removes whitespace tokens from the array ends
+	 * @param {Array} tokens
+	 * @param {Number} mask Mask indicating from which end whitespace should be 
+	 * removed 
+	 * @returns {Array}
+	 */
+	function trimWhitespaceTokens(tokens, mask) {
+		mask = mask || (WHITESPACE_REMOVE_FROM_START | WHITESPACE_REMOVE_FROM_END);
+		var whitespace = ['white', 'line'];
+		
+		if ((mask & WHITESPACE_REMOVE_FROM_END) == WHITESPACE_REMOVE_FROM_END)
+			while (tokens.length && _.include(whitespace, _.last(tokens).type)) {
+				tokens.pop();
+	 		}
+		
+		if ((mask & WHITESPACE_REMOVE_FROM_START) == WHITESPACE_REMOVE_FROM_START)
+			while (tokens.length && _.include(whitespace, tokens[0].type)) {
+				tokens.shift();
+			}
+		
+		return tokens;
+	}
+	
+	/**
+	 * Helper function that searches for selector range for <code>CSSEditRule</code>
+	 * @param {TokenIterator} it
+	 * @returns {Range}
+	 */
+	function findSelectorRange(it) {
+		var tokens = [], token;
+ 		var start = it.position(), end;
  		
- 		this.children = [];
- 		this.properties = [];
+ 		while (token = it.next()) {
+			if (token.type == '{')
+				break;
+			tokens.push(token);
+		}
  		
- 		this.parent = null;
- 		this.next_sibling = null;
- 		this.prev_sibling = null;
- 	}
- 	
- 	CSSTreeNode.prototype = {
- 		/**
- 		 * @param {syntaxToken} token
- 		 * @returns {CSSTreeNode}
- 		 */
- 		addChild: function(token) {
- 			var child = new CSSTreeNode(token);
- 			/** @type CSSTreeNode */
- 			var lastChild = _.last(this.children);
- 				
- 			child.parent = this;
- 			if (lastChild) {
- 				lastChild.next_sibling = child;
- 				child.prev_sibling = lastChild;
- 			}
- 			
- 			this.children.push(child);
- 			return child;
- 		},
+ 		trimWhitespaceTokens(tokens);
  		
- 		/**
- 		 * Adds CSS property name and value into current section
- 		 * @param {syntaxToken} name_token
- 		 * @param {syntaxToken} value_token
- 		 */
- 		addProperty: function(nameToken, valueToken) {
- 			this.properties.push({
- 				name: nameToken ? nameToken.content : null,
- 				value: valueToken ? valueToken.content : null,
- 				name_token: nameToken,
- 				value_token: valueToken
- 			});
+ 		if (tokens.length) {
+ 			start = tokens[0].start;
+ 			end = _.last(tokens).end;
+ 		} else {
+ 			end = start;
  		}
- 	};
+ 		
+ 		return range(start, end - start);
+	}
+	
+	/**
+	 * Helper function that searches for CSS property value range next to
+	 * iterator's current position  
+	 * @param {TokenIterator} it
+	 * @returns {Range}
+	 */
+	function findValueRange(it) {
+		// find value start position
+		var skipTokens = ['white', 'line', ':'];
+		var tokens = [], token, start, end;
+		
+		it.nextUntil(function(tok) {
+			return !_.include(skipTokens, this.itemNext().type);
+		});
+		
+		start = it.current().end;
+		// consume value
+		while (token = it.next()) {
+			if (token.type == '}' || token.type == ';') {
+				// found value end
+				trimWhitespaceTokens(tokens, WHITESPACE_REMOVE_FROM_START 
+						| (token.type == '}' ? WHITESPACE_REMOVE_FROM_END : 0));
+				
+				if (tokens.length) {
+					start = tokens[0].start;
+					end = _.last(tokens).end;
+				} else {
+					end = start;
+				}
+				
+				return range(start, end - start);
+			}
+			
+			tokens.push(token);
+		}
+		
+		// reached the end of tokens list
+		if (tokens.length) {
+			return range(tokens[0].start, _.last(tokens).end - tokens[0].start);
+		}
+	}
+	
+	/**
+	 * Finds parts of complex CSS value
+	 * @param {String} str
+	 * @returns {Array} Returns list of <code>Range</code>'s
+	 */
+	function findParts(str) {
+		/** @type StringStream */
+		var stream = require('stringStream').create(str);
+		var ch;
+		var result = [];
+		var sep = /[\s\u00a0,]/;
+		
+		var add = function() {
+			stream.next();
+			result.push(range(stream.start, stream.current()));
+			stream.start = stream.pos;
+		};
+		
+		// skip whitespace
+		stream.eatSpace();
+		stream.start = stream.pos;
+		
+		while (ch = stream.next()) {
+			if (ch == '"' || ch == "'") {
+				stream.next();
+				if (!stream.skipTo(ch)) break;
+				add();
+			} else if (ch == '(') {
+				// function found, may have nested function
+				stream.backUp(1);
+				if (!stream.skipToPair('(', ')')) break;
+				stream.backUp(1);
+				add();
+			} else {
+				if (sep.test(ch)) {
+					result.push(range(stream.start, stream.current().length - 1));
+					stream.eatWhile(sep);
+					stream.start = stream.pos;
+				}
+			}
+		}
+		
+		add();
+		
+		return _.chain(result)
+			.filter(function(item) {
+				return !!item.length();
+			})
+			.uniq(false, function(item) {
+				return item.toString();
+			})
+			.value();
+	}
+	
+	/**
+	 * @class
+	 * @extends EditContainer
+	 */
+	var CSSEditContainer = require('editTree').EditContainer.extend({
+		initialize: function(source, options) {
+			_.defaults(this.options, defaultOptions);
+			var editTree = require('editTree');
+			
+			/** @type TokenIterator */
+	 		var it = require('tokenIterator').create(
+	 				require('cssParser').parse(source));
+	 		
+	 		var selectorRange = findSelectorRange(it);
+	 		this._positions.name = selectorRange.start;
+	 		this._name = selectorRange.substring(source);
+	 		
+	 		if (!it.current() || it.current().type != '{')
+	 			throw 'Invalid CSS rule';
+	 		
+	 		this._positions.contentStart = it.position() + 1;
+	 		
+	 		// consume properties
+	 		var propertyRange, valueRange, token;
+			while (token = it.next()) {
+				if (token.type == 'identifier') {
+					propertyRange = range(token);
+					valueRange = findValueRange(it);
+					var end = (it.current() && it.current().type == ';') 
+						? range(it.current())
+						: range(valueRange.end, 0);
+					this._children.push(new CSSEditElement(this,
+							editTree.createToken(propertyRange.start, propertyRange.substring(source)),
+							editTree.createToken(valueRange.start, valueRange.substring(source)),
+							editTree.createToken(end.start, end.substring(source))
+							));
+				}
+			}
+			
+			this._saveStyle();
+		},
+		
+		/**
+		 * Remembers all styles of properties
+		 * @private
+		 */
+		_saveStyle: function() {
+			var start = this._positions.contentStart;
+			var source = this.source;
+			
+			_.each(this.list(), /** @param {CSSEditProperty} p */ function(p) {
+				p.styleBefore = source.substring(start, p.namePosition());
+				p.styleSeparator = source.substring(p.nameRange().end, p.valuePosition());
+				
+				// graceful and naive comments removal 
+				p.styleBefore = _.last(p.styleBefore.split('*/'));
+				p.styleSeparator = p.styleSeparator.replace(/\/\*.*?\*\//g, '');
+				
+				start = p.range().end;
+			});
+		},
+		
+		/**
+		 * Adds new CSS property 
+		 * @param {String} name Property name
+		 * @param {String} value Property value
+		 * @param {Number} pos Position at which to insert new property. By 
+		 * default the property is inserted at the end of rule 
+		 * @returns {CSSEditProperty}
+		 */
+		add: function(name, value, pos) {
+			var list = this.list();
+			var start = this._positions.contentStart;
+			var styles = _.pick(this.options, 'styleBefore', 'styleSeparator');
+			var editTree = require('editTree');
+			
+			if (_.isUndefined(pos))
+				pos = list.length;
+			
+			/** @type CSSEditProperty */
+			var donor = list[pos];
+			if (donor) {
+				start = donor.fullRange().start;
+			} else if (donor = list[pos - 1]) {
+				// make sure that donor has terminating semicolon
+				donor.end(';');
+				start = donor.range().end;
+			}
+			
+			if (donor) {
+				styles = _.pick(donor, 'styleBefore', 'styleSeparator');
+			}
+			
+			var nameToken = editTree.createToken(start + styles.styleBefore.length, name);
+			var valueToken = editTree.createToken(nameToken.end + styles.styleSeparator.length, value);
+			
+			var property = new CSSEditElement(this, nameToken, valueToken,
+					editTree.createToken(valueToken.end, ';'));
+			
+			_.extend(property, styles);
+			
+			// write new property into the source
+			this._updateSource(property.styleBefore + property.toString(), start);
+			
+			// insert new property
+			this._children.splice(pos, 0, property);
+			return property;
+		}
+	});
+	
+	/**
+	 * @class
+	 * @type CSSEditElement
+	 * @constructor
+	 */
+	var CSSEditElement = require('editTree').EditElement.extend({
+		initialize: function(rule, name, value, end) {
+			this.styleBefore = rule.options.styleBefore;
+			this.styleSeparator = rule.options.styleSeparator;
+			
+			this._end = end.value;
+			this._positions.end = end.start;
+		},
+		
+		/**
+		 * Returns ranges of complex value parts
+		 * @returns {Array} Returns <code>null</code> if value is not complex
+		 */
+		valueParts: function(isAbsolute) {
+			var parts = findParts(this.value());
+			if (isAbsolute) {
+				var offset = this.valuePosition(true);
+				_.each(parts, function(p) {
+					p.shift(offset);
+				});
+			}
+			
+			return parts;
+		},
+		
+		/**
+		 * Sets of gets property end value (basically, it's a semicolon)
+		 * @param {String} val New end value. If not passed, current 
+		 * value is returned
+		 */
+		end: function(val) {
+			if (!_.isUndefined(val) && this._end !== val) {
+				this.parent._updateSource(val, this._positions.end, this._positions.end + this._end.length);
+				this._end = val;
+			}
+			
+			return this._end;
+		},
+		
+		/**
+		 * Returns full rule range, with indentation
+		 * @param {Boolean} isAbsolute Return absolute range (with respect of
+		 * rule offset)
+		 * @returns {Range}
+		 */
+		fullRange: function(isAbsolute) {
+			var r = this.range(isAbsolute);
+			r.start -= this.styleBefore.length;
+			return r;
+		},
+		
+		/**
+		 * Returns item string representation
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this.name() + this.styleSeparator + this.value() + this.end();
+		}
+	});
 	
 	return {
 		/**
-		 * Parses CSS and optimizes parsed chunks
-		 * @see ParserUtils#optimizeCSS
-		 * @param {String} source CSS source code fragment
-		 * @param {Number} offset Offset of CSS fragment inside whole document
-		 * @return {Array}
-		 * @memberOf zen_coding.parserUtils
+		 * Parses CSS rule into editable tree
+		 * @param {String} source
+		 * @param {Object} options
+		 * @memberOf zen_coding.cssEditTree
+		 * @returns {EditContainer}
 		 */
-		parseCSS: function(source, offset) {
-			return this.optimizeCSS(require('cssParser').lex(source), offset || 0, source);
+		parse: function(source, options) {
+			return new CSSEditContainer(source, options);
 		},
 		
 		/**
-		 * Parses HTML and optimizes parsed chunks
-		 * @param {String} source HTML source code fragment
-		 * @param {Number} offset Offset of HTML fragment inside whole document
-		 * @return {Array}
+		 * Extract and parse CSS rule from specified position in <code>content</code> 
+		 * @param {String} content CSS source code
+		 * @param {Number} pos Character position where to start source code extraction
+		 * @returns {EditContainer}
 		 */
-		parseHTML: function(tag, offset) {
-			var tokens = require('xmlParser').make(tag),
-				result = [],
-				t, i = 0;
-				
-			try {
-				while (t = tokens.next()) {
-					result.push(makeToken(t.style, t.content, offset + i, 0));
-					i += t.value.length;
-				}
-			} catch (e) {
-				if (e != 'StopIteration') throw e;
-			}
+		parseFromPosition: function(content, pos, isBackward) {
+			var bounds = this.extractRule(content, pos, isBackward);
+			if (!bounds || !bounds.inside(pos))
+				// no matching CSS rule or caret outside rule bounds
+				return null;
 			
-			return result;
-		},
-		
-		/**
-		 * Optimizes parsed CSS tokens: combines selector chunks, complex values
-		 * into a single chunk
-		 * @param {Array} tokens Tokens produced by <code>CSSEX.lex()</code>
-		 * @param {Number} offset CSS rule offset in source code (character index)
-		 * @param {String} content Original CSS source code
-		 * @return {Array} Optimized tokens  
-		 */
-		optimizeCSS: function(tokens, offset, content) {
-			offset = offset || 0;
-			var result = [], token, i, il, _o = 0,
-				in_rules = false,
-				in_value = false,
-				delta = 0,
-				acc_type,
-				acc_tokens = {
-					/** @type {makeToken} */
-					selector: null,
-					/** @type {makeToken} */
-					value: null
-				},
-				nl_size,
-				orig_tokens = [];
-				
-			function addToken(token, type) {
-				if (type && type in acc_tokens) {
-					if (!acc_tokens[type]) {
-						acc_tokens[type] = makeToken(type, token.value, offset + delta + token.charstart, i);
-						result.push(acc_tokens[type]);
-					} else {
-						acc_tokens[type].content += token.value;
-						acc_tokens[type].end += token.value.length;
-						acc_tokens[type].ref_end_ix = i;
-					}
-				} else {
-					result.push(makeToken(token.type, token.value, offset + delta + token.charstart, i));
-				}
-			}
-			
-			for (i = 0, il = tokens.length; i < il; i++) {
-				token = tokens[i];
-				acc_type = null;
-				
-				if (token.type == 'line') {
-					delta += _o;
-					nl_size = content ? calculateNlLength(content, delta) : 1;
-					
-					var tok_value = nl_size == 1 ? '\n' : '\r\n';
-					orig_tokens.push(makeToken(token.type, tok_value, offset + delta));
-					
-					result.push(makeToken(token.type, tok_value, offset + delta, i));
-					delta += nl_size;
-					_o = 0;
-					
-					continue;
-				}
-				
-				orig_tokens.push(makeToken(token.type, token.value, offset + delta + token.charstart));
-				
-//				_o = token.charend;
-				// use charstart and length because of incorrect charend 
-				// computation for whitespace
-				_o = token.charstart + token.value.length;
-				
-				if (token.type != 'white') {
-					if (token.type == '{') {
-						in_rules = true;
-						acc_tokens.selector = null;
-					} else if (in_rules) {
-						if (token.type == ':') {
-							in_value = true;
-						} else if (token.type == ';') {
-							in_value = false;
-							acc_tokens.value = null;
-						}  else if (token.type == '}') {
-							in_value = in_rules = false;
-							acc_tokens.value = null;
-						} else if (in_value || acc_tokens.value) {
-							acc_type = 'value';
-						}
-					} else if (acc_tokens.selector || (!in_rules && !isStopChar(token))) {
-						// start selector token
-						acc_type = 'selector';
-					}
-					
-					addToken(token, acc_type);
-				} else {
-					// whitespace token, decide where it should be
-					if (i < il - 1 && isStopChar(tokens[i + 1])) continue;
-					
-					if (acc_tokens.selector || acc_tokens.value)
-						addToken(token, acc_tokens.selector ? 'selector' : 'value');
-				}
-			}
-			
-			result.__original = orig_tokens;
-			return postProcessOptimized(result, orig_tokens);
+			return this.parse(bounds.substring(content), {
+				offset: bounds.start
+			});
 		},
 		
 		/**
 		 * Extracts single CSS selector definition from source code
 		 * @param {String} content CSS source code
 		 * @param {Number} pos Character position where to start source code extraction
+		 * @returns {Range}
 		 */
-		extractCSSRule: function(content, pos, is_backward) {
-			var result = '', 
-				c_len = content.length,
-				offset = pos, 
-				brace_pos = -1, ch;
+		extractRule: function(content, pos, isBackward) {
+			var result = '';
+			var len = content.length;
+			var offset = pos;
+			var stopChars = '{}/\\<>';
+			var bracePos = -1, ch;
 			
 			// search left until we find rule edge
 			while (offset >= 0) {
 				ch = content.charAt(offset);
 				if (ch == '{') {
-					brace_pos = offset;
+					bracePos = offset;
 					break;
 				}
-				else if (ch == '}' && !is_backward) {
+				else if (ch == '}' && !isBackward) {
 					offset++;
 					break;
 				}
@@ -5905,13 +7166,13 @@ zen_coding.define('parserUtils', function(require, _) {
 			}
 			
 			// search right for full rule set
-			while (offset < c_len) {
+			while (offset < len) {
 				ch = content.charAt(offset);
-				if (ch == '{')
-					brace_pos = offset;
-				else if (ch == '}') {
-					if (brace_pos != -1)
-						result = content.substring(brace_pos, offset + 1);
+				if (ch == '{') {
+					bracePos = offset;
+				} else if (ch == '}') {
+					if (bracePos != -1)
+						result = content.substring(bracePos, offset + 1);
 					break;
 				}
 				
@@ -5920,394 +7181,1670 @@ zen_coding.define('parserUtils', function(require, _) {
 			
 			if (result) {
 				// find CSS selector
-				offset = brace_pos - 1;
+				offset = bracePos - 1;
 				var selector = '';
 				while (offset >= 0) {
 					ch = content.charAt(offset);
-					if (css_stop_chars.indexOf(ch) != -1) break;
+					if (stopChars.indexOf(ch) != -1) break;
 					offset--;
 				}
 				
 				// also trim whitespace
-				selector = content.substring(offset + 1, brace_pos).replace(/^[\s\n\r]+/m, '');
-				return [brace_pos - selector.length, brace_pos + result.length];
-			}
-			
-			return null;
-		},
-		
-		token: makeToken,
-		
-		/**
-		 * Find value token, staring at <code>pos</code> index and moving right
-		 * @param {Array} tokens
-		 * @param {Number} pos
-		 * @return {syntaxToken}
-		 */
-		findValueToken: function(tokens, pos) {
-			for (var i = pos, il = tokens.length; i < il; i++) {
-				var t = tokens[i];
-				if (t.type == 'value')
-					return t;
-				else if (t.type == 'identifier' || t.type == ';')
-					break;
+				selector = content.substring(offset + 1, bracePos).replace(/^[\s\n\r]+/m, '');
+				return require('range').create(bracePos - selector.length, result.length + selector.length);
 			}
 			
 			return null;
 		},
 		
 		/**
-		 * Search for token with specified type left to the specified position
-		 * @param {Array} tokens List of parsed tokens
-		 * @param {Number} pos Position where to start searching
-		 * @param {String} type Token type
-		 * @return {Number} Token index
-		 */
-		findTokenFromPosition: function(tokens, pos, type) {
-			// find token under caret
-			var tokenIx = -1;
-			for (var i = 0, il = tokens.length; i < il; i++) {
-				var token = tokens[i];
-				if (token.start <= pos && token.end >= pos) {
-					tokenIx = i;
-					break;
-				}
-			}
-			
-			if (tokenIx != -1) {
-				// token found, search left until we find token with specified type
-				while (tokenIx >= 0) {
-					if (tokens[tokenIx].type == type)
-						return tokenIx;
-					tokenIx--;
-				}
-			}
-			
-			return -1;
-		},
-		
-		/**
-	 	 * Parses content of CSS file into some sort of syntax tree for faster 
-	 	 * search and lookups
-	 	 * @param {String} text CSS stylesheet
-	 	 */
- 		cssParseIntoTree: function(text) {
-	 		var tokens = this.parseCSS(text);
-	 		var tree = new CSSTreeNode();
-	 		/** @type syntaxToken */
-	 		var curNode = tree;
-	 			
-	 		_.each(tokens, function(token, i) {
-	 			switch (token.type) {
-		 			case '{': // rule/section start
-		 				curNode = curNode.addChild(token);
-		 				break;
-		 			case '}': // rule/section end
-		 				curNode.end_token = token;
-		 				curNode = curNode.parent;
-		 				break;
-		 			case 'identifier': // CSS property
-		 				if (curNode) {
-		 					curNode.addProperty(token, this.findValueToken(tokens, i + 1));
-		 				}
-		 				break;
-	 			}
-			});
-	 		
-	 		return tree;
-	 	},
-	 	
-	 	/**
-	 	 * Search for insertion point for new CSS properties
-	 	 * @param {Array} tokens
-	 	 * @param {Number} start_ix Token index where to start searching
-	 	 */
-	 	findCSSInsertionPoint: function(tokens, startIx) {
-	 		var insPoint;
-	 		var insIx = -1; 
-	 		var needCol = false;
-	 			
-	 		for (var i = startIx, il = tokens.length; i < il; i++) {
-	 			var t = tokens[i];
-	 			if (t.type == 'value') {
-	 				insPoint = t;
-	 				insIx = i;
-	 				// look ahead for rule termination
-	 				if (tokens[i + 1] && tokens[i + 1].type == ';') {
-	 					insPoint = tokens[i + 1];
-	 					insIx += 1;
-	 				} else {
-	 					needCol = true;
-	 				}
-	 				break;
-	 			}
-	 		}
-	 		
-	 		return {
-	 			token: insPoint,
-	 			ix: insIx,
-	 			need_col: needCol
-	 		};
-	 	},
-	 	
-	 	/**
-	 	 * Learns formatting style from parsed tokens
-	 	 * @param {Array} tokens List of tokens
-	 	 * @param {Number} pos Identifier token position, from which style should be learned
-	 	 * @returns {Function} Function with <code>(name, value)</code> arguments that will create
-	 	 * CSS rule based on learned formatting
-	 	 */
-	 	learnCSSStyle: function(tokens, pos) {
-	 		var prefix = '', glue = '', i, il;
-	 		
-	 		// use original tokens instead of optimized ones
-	 		pos = tokens[pos].ref_start_ix;
-	 		tokens = tokens.__original;
-	 		
-	 		// learn prefix
-	 		for (i = pos - 1; i >= 0; i--) {
-	 			if (tokens[i].type == 'white') {
-	 				prefix = tokens[i].content + prefix;
-	 			} else if (tokens[i].type == 'line') {
-	 				prefix = tokens[i].content + prefix;
-	 				break;
-	 			} else {
-	 				break;
-	 			}
-	 		}
-	 		
-	 		// learn glue
-	 		for (i = pos + 1, il = tokens.length; i < il; i++) {
-	 			if (tokens[i].type == 'white' || tokens[i].type == ':')
-	 				glue += tokens[i].content;
-	 			else break;
-	 		}
-	 		
-	 		if (glue.indexOf(':') == -1)
-	 			glue = ':';
-	 		
-	 		return function(name, value) {
-	 			return prefix + name + glue + value + ';';
-	 		};
-	 	},
-	 	
-	 	/**
 	 	 * Removes vendor prefix from CSS property
 	 	 * @param {String} name CSS property
 	 	 * @return {String}
 	 	 */
-	 	getBaseCSSName: function(name) {
+	 	baseName: function(name) {
 	 		return name.replace(/^\s*\-\w+\-/, '');
-	 	}
+	 	},
+	 	
+	 	/**
+	 	 * Finds parts of complex CSS value
+	 	 * @param {String} str
+	 	 * @returns {Array}
+	 	 */
+	 	findParts: findParts
 	};
-});(function() {
+});/**
+ * XML EditTree is a module that can parse an XML/HTML element into a tree with 
+ * convenient methods for adding, modifying and removing attributes. These 
+ * changes can be written back to string with respect of code formatting.
+ * 
+ * @memberOf __xmlEditTreeDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.define('xmlEditTree', function(require, _) {
+	var defaultOptions = {
+		styleBefore: ' ',
+		styleSeparator: '=',
+		styleQuote: '"',
+		offset: 0
+	};
+	
+	var startTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/m;
+	
+	var XMLEditContainer = require('editTree').EditContainer.extend({
+		initialize: function(source, options) {
+			_.defaults(this.options, defaultOptions);
+			this._positions.name = 1;
+			
+			var attrToken = null;
+			var tokens = require('xmlParser').parse(source);
+			var range = require('range');
+			
+			_.each(tokens, function(token) {
+				token.value = range.create(token).substring(source);
+				switch (token.type) {
+					case 'tag':
+						if (/^<[^\/]+/.test(token.value)) {
+							this._name = token.value.substring(1);
+						}
+						break;
+						
+					case 'attribute':
+						// add empty attribute
+						if (attrToken) {
+							this._children.push(new XMLEditElement(this, attrToken));
+						}
+						
+						attrToken = token;
+						break;
+						
+					case 'string':
+						this._children.push(new XMLEditElement(this, attrToken, token));
+						attrToken = null;
+						break;
+				}
+			}, this);
+			
+			if (attrToken) {
+				this._children.push(new XMLEditElement(this, attrToken));
+			}
+			
+			this._saveStyle();
+		},
+		
+		/**
+		 * Remembers all styles of properties
+		 * @private
+		 */
+		_saveStyle: function() {
+			var start = this.nameRange().end;
+			var source = this.source;
+			
+			_.each(this.list(), /** @param {EditElement} p */ function(p) {
+				p.styleBefore = source.substring(start, p.namePosition());
+				
+				if (p.valuePosition() !== -1) {
+					p.styleSeparator = source.substring(p.namePosition() + p.name().length, p.valuePosition() - p.styleQuote.length);
+				}
+				
+				start = p.range().end;
+			});
+		},
+		
+		/**
+		 * Adds new attribute 
+		 * @param {String} name Property name
+		 * @param {String} value Property value
+		 * @param {Number} pos Position at which to insert new property. By 
+		 * default the property is inserted at the end of rule 
+		 */
+		add: function(name, value, pos) {
+			var list = this.list();
+			var start = this.nameRange().end;
+			var editTree = require('editTree');
+			var styles = _.pick(this.options, 'styleBefore', 'styleSeparator', 'styleQuote');
+			
+			if (_.isUndefined(pos))
+				pos = list.length;
+			
+			
+			/** @type XMLEditAttribute */
+			var donor = list[pos];
+			if (donor) {
+				start = donor.fullRange().start;
+			} else if (donor = list[pos - 1]) {
+				start = donor.range().end;
+			}
+			
+			if (donor) {
+				styles = _.pick(donor, 'styleBefore', 'styleSeparator', 'styleQuote');
+			}
+			
+			value = styles.styleQuote + value + styles.styleQuote;
+			
+			var attribute = new XMLEditElement(this, 
+					editTree.createToken(start + styles.styleBefore.length, name),
+					editTree.createToken(start + styles.styleBefore.length + name.length 
+							+ styles.styleSeparator.length, value)
+					);
+			
+			_.extend(attribute, styles);
+			
+			// write new attribute into the source
+			this._updateSource(attribute.styleBefore + attribute.toString(), start);
+			
+			// insert new attribute
+			this._children.splice(pos, 0, attribute);
+			return attribute;
+		}
+	});
+	
+	var XMLEditElement = require('editTree').EditElement.extend({
+		initialize: function(parent, nameToken, valueToken) {
+			this.styleBefore = parent.options.styleBefore;
+			this.styleSeparator = parent.options.styleSeparator;
+			
+			var value = '', quote = parent.options.styleQuote;
+			if (valueToken) {
+				value = valueToken.value;
+				quote = value.charAt(0);
+				if (quote == '"' || quote == "'") {
+					value = value.substring(1);
+				} else {
+					quote = '';
+				}
+				
+				if (quote && value.charAt(value.length - 1) == quote) {
+					value = value.substring(0, value.length - 1);
+				}
+			}
+			
+			this.styleQuote = quote;
+			
+			this._value = value;
+			this._positions.value = valueToken ? valueToken.start + quote.length : -1;
+		},
+		
+		/**
+		 * Returns full rule range, with indentation
+		 * @param {Boolean} isAbsolute Return absolute range (with respect of
+		 * rule offset)
+		 * @returns {Range}
+		 */
+		fullRange: function(isAbsolute) {
+			var r = this.range(isAbsolute);
+			r.start -= this.styleBefore.length;
+			return r;
+		},
+		
+		toString: function() {
+			return this.name() + this.styleSeparator
+				+ this.styleQuote + this.value() + this.styleQuote;
+		}
+	});
+	
+	return {
+		/**
+		 * Parses HTML element into editable tree
+		 * @param {String} source
+		 * @param {Object} options
+		 * @memberOf zen_coding.htmlEditTree
+		 * @returns {EditContainer}
+		 */
+		parse: function(source, options) {
+			return new XMLEditContainer(source, options);
+		},
+		
+		/**
+		 * Extract and parse HTML from specified position in <code>content</code> 
+		 * @param {String} content CSS source code
+		 * @param {Number} pos Character position where to start source code extraction
+		 * @returns {XMLEditElement}
+		 */
+		parseFromPosition: function(content, pos, isBackward) {
+			var bounds = this.extractTag(content, pos, isBackward);
+			if (!bounds || !bounds.inside(pos))
+				// no matching HTML tag or caret outside tag bounds
+				return null;
+			
+			return this.parse(bounds.substring(content), {
+				offset: bounds.start
+			});
+		},
+		
+		/**
+		 * Extracts nearest HTML tag range from <code>content</code>, starting at 
+		 * <code>pos</code> position
+		 * @param {String} content
+		 * @param {Number} pos
+		 * @param {Boolean} isBackward
+		 * @returns {Range}
+		 */
+		extractTag: function(content, pos, isBackward) {
+			var len = content.length, i;
+			var range = require('range');
+			
+			// max extraction length. I don't think there may be tags larger 
+			// than 2000 characters length
+			var maxLen = Math.min(2000, len);
+			
+			/** @type Range */
+			var r = null;
+			
+			var match = function(pos) {
+				var m;
+				if (content.charAt(pos) == '<' && (m = content.substr(pos, maxLen).match(startTag)))
+					return range.create(pos, m[0]);
+			};
+			
+			// lookup backward, in case we are inside tag already
+			for (i = pos; i >= 0; i--) {
+				if (r = match(i)) break;
+			}
+			
+			if (r && (r.inside(pos) || isBackward))
+				return r;
+			
+			if (!r && isBackward)
+				return null;
+			
+			// search forward
+			for (i = pos; i < len; i++) {
+				if (r = match(i))
+					return r;
+			}
+		}
+	};
+});/**
+ * 'Expand abbreviation' editor action: extracts abbreviation from current caret 
+ * position and replaces it with formatted output. 
+ * <br><br>
+ * This behavior can be overridden with custom handlers which can perform 
+ * different actions when 'Expand Abbreviation' action is called.
+ * For example, a CSS gradient handler that produces vendor-prefixed gradient
+ * definitions registers its own expand abbreviation handler.  
+ *  
+ * @constructor
+ * @memberOf __expandAbbreviationActionDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('expandAbbreviation', function(require, _) {
 	/**
-	 * Parsed element that represents intermediate node in abbreviation 
-	 * transformation process. This element will then be converted to 
-	 * <code>ZenNode</code>
-	 * 
-	 * @param {TreeNode} node Parsed tree node
-	 * @param {String} syntax Tag type (html, xml)
-	 * @param {__zenDataElement} resource Matched element resource from <code>zen_settings</code>
+	 * @type HandlerList List of registered handlers
 	 */
-	function ParsedElement(node, syntax, resource) {
-		this._abbr = resource;
+	var handlers = require('handlerList').create();
+	
+	/**
+	 * Search for abbreviation in editor from current caret position
+	 * @param {IZenEditor} editor Editor instance
+	 * @return {String}
+	 */
+	function findAbbreviation(editor) {
+		/** @type Range */
+		var range = require('range').create(editor.getSelectionRange());
+		var content = String(editor.getContent());
+		if (range.length()) {
+			// abbreviation is selected by user
+			return range.substring(content);
+		}
 		
-		this.name = this._abbr ? this._abbr.name : node.name;
-		this.real_name = node.name;
-		this.count = node.count || 1;
-		this.syntax = syntax;
-		this._content = '';
-		this._paste_content = '';
-		this.repeat_by_lines = !!node.is_repeating;
-		this.is_repeating = node && node.count > 1;
-		this.parent = null;
-		this.has_implicit_name = !!node.has_implict_name;
-		this.children = [];
+		// search for new abbreviation from current caret position
+		var curLine = editor.getCurrentLineRange();
+		return require('actionUtils').extractAbbreviation(content.substring(curLine.start, range.start));
+	}
+	
+	var actions = require('actions');
+	/**
+	 * 'Expand abbreviation' editor action 
+	 * @param {IZenEditor} editor Editor instance
+	 * @param {String} syntax Syntax type (html, css, etc.)
+	 * @param {String} profile Output profile name (html, xml, xhtml)
+	 * @return {Boolean} Returns <code>true</code> if abbreviation was expanded 
+	 * successfully
+	 */
+	actions.add('expand_abbreviation', function(editor, syntax, profile) {
+		return handlers.exec(false, _.toArray(arguments));
+	});
+	
+	/**
+	 * A special version of <code>expandAbbreviation</code> function: if it can't
+	 * find abbreviation, it will place Tab character at caret position
+	 * @param {IZenEditor} editor Editor instance
+	 * @param {String} syntax Syntax type (html, css, etc.)
+	 * @param {String} profile Output profile name (html, xml, xhtml)
+	 */
+	actions.add('expand_abbreviation_with_tab', function(editor, syntax, profile) {
+		if (!actions.run('expand_abbreviation', editor, syntax, profile))
+			editor.replaceContent(require('resources').getVariable('indentation'), editor.getCaretPos());
+	}, {hidden: true});
+	
+	// setup default handler
+	/**
+	 * Extracts abbreviation from current caret 
+	 * position and replaces it with formatted output 
+	 * @param {IZenEditor} editor Editor instance
+	 * @param {String} syntax Syntax type (html, css, etc.)
+	 * @param {String} profile Output profile name (html, xml, xhtml)
+	 * @return {Boolean} Returns <code>true</code> if abbreviation was expanded 
+	 * successfully
+	 */
+	handlers.add(function(editor, syntax, profile) {
+		var info = require('editorUtils').outputInfo(editor, syntax, profile);
+		var caretPos = editor.getSelectionRange().end;
+		var abbr;
+		var content = '';
+			
+		if ( (abbr = findAbbreviation(editor)) ) {
+			content = zen_coding.expandAbbreviation(abbr, info.syntax, info.profile, 
+					require('actionUtils').captureContext(editor));
+			if (content) {
+				editor.replaceContent(content, caretPos - abbr.length, caretPos);
+				return true;
+			}
+		}
 		
-		this.setContent(node.text);
+		return false;
+	}, {order: -1});
+	
+	return {
+		/**
+		 * Adds custom expand abbreviation handler. The passed function should 
+		 * return <code>true</code> if it was performed successfully, 
+		 * <code>false</code> otherwise.
+		 * 
+		 * Added handlers will be called when 'Expand Abbreviation' is called
+		 * in order they were added
+		 * @param {Function} fn
+		 * @param {Object} options
+		 */
+		addHandler: function(fn, options) {
+			handlers.add(fn, options);
+		},
+		
+		/**
+		 * Removes registered handler
+		 * @returns
+		 */
+		removeHandler: function(fn) {
+			handlers.remove(fn, options);
+		}
+	};
+});/**
+ * Action that wraps content with abbreviation. For convenience, action is 
+ * defined as reusable module
+ * @constructor
+ * @memberOf __wrapWithAbbreviationDefine
+ */
+zen_coding.define('wrapWithAbbreviation', function(require, _) {
+	/**
+	 * Wraps content with abbreviation
+	 * @param {IZenEditor} Editor instance
+	 * @param {String} abbr Abbreviation to wrap with
+	 * @param {String} syntax Syntax type (html, css, etc.)
+	 * @param {String} profile Output profile name (html, xml, xhtml)
+	 */
+	require('actions').add('wrap_with_abbreviation', function (editor, abbr, syntax, profile) {
+		var info = require('editorUtils').outputInfo(editor, syntax, profile);
+		var utils = require('utils');
+		/** @type zen_coding.editorUtils */
+		var editorUtils = require('editorUtils');
+		var matcher = require('html_matcher');
+		
+		abbr = abbr || editor.prompt("Enter abbreviation");
+		
+		if (!abbr) 
+			return null;
+		
+		abbr = String(abbr);
+		
+		var range = editor.getSelectionRange();
+		var startOffset = range.start;
+		var endOffset = range.end;
+		
+		if (startOffset == endOffset) {
+			// no selection, find tag pair
+			range = matcher(info.content, startOffset, info.profile);
+			
+			if (!range || range[0] == -1) // nothing to wrap
+				return false;
+			
+			/** @type Range */
+			var narrowedSel = utils.narrowToNonSpace(info.content, range[0], range[1] - range[0]);
+			startOffset = narrowedSel.start;
+			endOffset = narrowedSel.end;
+		}
+		
+		var newContent = utils.escapeText(info.content.substring(startOffset, endOffset));
+		var result = require('wrapWithAbbreviation').wrap(abbr, editorUtils.unindent(editor, newContent), info.syntax, info.profile);
+		
+		if (result) {
+//			editor.setCaretPos(endOffset);
+			editor.replaceContent(result, startOffset, endOffset);
+			return true;
+		}
+		
+		return false;
+	});
+	
+	return {
+		/**
+		 * Wraps passed text with abbreviation. Text will be placed inside last
+		 * expanded element
+		 * @memberOf zen_coding.wrapWithAbbreviation
+		 * @param {String} abbr Abbreviation
+		 * @param {String} text Text to wrap
+		 * @param {String} syntax Document type (html, xml, etc.). Default is 'html'
+		 * @param {String} profile Output profile's name. Default is 'plain'
+		 * @return {String}
+		 */
+		wrap: function(abbr, text, syntax, profile) {
+			/** @type zen_coding.filters */
+			var filters = require('filters');
+			/** @type zen_coding.utils */
+			var utils = require('utils');
+			/** @type zen_coding.transform */
+			var transform = require('transform');
+			
+			var pasted = false;
+			
+			syntax = syntax || zen_coding.defaultSyntax();
+			profile = profile || zen_coding.defaultProfile();
+			
+			var data = filters.extractFromAbbreviation(abbr);
+			var parsedTree = transform.createParsedTree(data[0], syntax);
+			if (parsedTree) {
+				if (parsedTree.multiply_elem) {
+					// we have a repeating element, put content in
+					parsedTree.multiply_elem.setPasteContent(text);
+					parsedTree.multiply_elem.repeat_by_lines = pasted = true;
+				}
+				
+				var outputTree = transform.rolloutTree(parsedTree);
+				if (!pasted) 
+					outputTree.pasteContent(text);
+				
+				var filtersList = filters.composeList(syntax, profile, data[1]);
+				filters.apply(outputTree, filtersList, profile);
+				return utils.replaceVariables(outputTree.toString());
+			}
+			
+			return null;
+		}
+	};
+});/**
+ * Toggles HTML and CSS comments depending on current caret context. Unlike
+ * the same action in most editors, this action toggles comment on currently
+ * matched item—HTML tag or CSS selector—when nothing is selected.
+ * 
+ * @param {Function} require
+ * @param {Underscore} _
+ * @memberOf __toggleCommentAction
+ * @constructor
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Toggle HTML comment on current selection or tag
+	 * @param {IZenEditor} editor
+	 * @return {Boolean} Returns <code>true</code> if comment was toggled
+	 */
+	function toggleHTMLComment(editor) {
+		/** @type Range */
+		var range = require('range').create(editor.getSelectionRange());
+		var info = require('editorUtils').outputInfo(editor);
+			
+		if (!range.length()) {
+			// no selection, find matching tag
+			var pair = require('html_matcher').getTags(info.content, editor.getCaretPos(), info.profile);
+			if (pair && pair[0]) { // found pair
+				range.start = pair[0].start;
+				range.end = pair[1] ? pair[1].end : pair[0].end;
+			}
+		}
+		
+		return genericCommentToggle(editor, '<!--', '-->', range);
 	}
 
-	ParsedElement.prototype = {
-		/**
-		 * Adds new child tag to current one
-		 * @param {ParsedElement} elem
-		 */
-		addChild: function(elem) {
-			elem.parent = this;
-			this.children.push(elem);
-		},
-		
-		/**
-		 * Check if current node contains children
-		 * @returns {Boolean}
-		 */
-		hasChildren: function() {
-			return !!this.children.length;
-		},
-		
-		/**
-		 * Adds new attribute
-		 * @param {String} name Attribute's name
-		 * @param {String} value Attribute's value
-		 */
-		addAttribute: function(name, value) {
-			if (!this.attributes)
-				this.attributes = [];
-				
-			if (!this._attr_hash)
-				this._attr_hash = {};
-			
-			/** @type {zen_coding.utils} */
-			var utils = zen_coding.require('utils');
-			
-			// escape pipe (caret) character with internal placeholder
-			value = utils.replaceUnescapedSymbol(value, '|', utils.getCaretPlaceholder());
-			
-			var a;
-			if (name in this._attr_hash) {
-				// attribute already exists, decide what to do
-				a = this._attr_hash[name];
-				if (name == 'class') {
-					// 'class' is a magic attribute
-					a.value += ((a.value) ? ' ' : '') + value;
-				} else {
-					a.value = value;
-				}
-			} else {
-				a = {name: name, value: value};
-				this._attr_hash[name] = a;
-				this.attributes.push(a);
-			}
-		},
-		
-		/**
-		 * Copy attributes from parsed node
-		 */
-		copyAttributes: function(node) {
-			if (node && node.attributes) {
-				var that = this;
-				_.each(node.attributes, function(attr) {
-					that.addAttribute(attr.name, attr.value);
-				});
-			}
-		},
-		
-		/**
-		 * This function tests if current tags' content contains xHTML tags. 
-		 * This function is mostly used for output formatting
-		 */
-		hasTagsInContent: function() {
-			return zen_coding.require('utils').matchesTag(this.getContent());
-		},
-		
-		/**
-		 * Set textual content for tag
-		 * @param {String} str Tag's content
-		 */
-		setContent: function(str) {
-			var utils = zen_coding.require('utils');
-			this._content = utils.replaceUnescapedSymbol(str || '', '|', utils.getCaretPlaceholder());
-		},
-		
-		/**
-		 * Returns tag's textual content
-		 * @return {String}
-		 */
-		getContent: function() {
-			return this._content || '';
-		},
-		
-		/**
-		 * Set content that should be pasted to the output
-		 * @param {String} val
-		 */
-		setPasteContent: function(val) {
-			this._paste_content = zen_coding.require('utils').escapeText(val);
-		},
-		
-		/**
-		 * Get content that should be pasted to the output
-		 * @return {String}
-		 */
-		getPasteContent: function() {
-			return this._paste_content;
-		},
-		
-		/**
-		 * Search for deepest and latest child of current element
-		 * @return {ParsedElement} Returns null if there's no children
-		 */
-		findDeepestChild: function() {
-			if (!this.children || !this.children.length)
-				return null;
-				
-			var deepestChild = this;
-			while (deepestChild.children.length) {
-				deepestChild = _.last(deepestChild.children);
-			}
-			
-			return deepestChild;
-		}
-	};
-	
-	var elems = zen_coding.require('elements');
-	elems.add('parsedElement', function(node, syntax, resource) {
-		var res = zen_coding.require('resources');
-		if (!resource && node.name) {
-			resource = res.getAbbreviation(syntax, node.name);
-		}
-		
-		if (resource && elems.is(resource, 'reference')) {
-			resource = res.getAbbreviation(type, resource.data);
-		}
-		
-		var elem = new ParsedElement(node, syntax, resource);
-		// add default attributes
-		if (elem._abbr)
-			elem.copyAttributes(elem._abbr);
-		
-		elem.copyAttributes(node);
-		
-		return elem;
-	});
-	
-	elems.add('parsedSnippet', function(node, syntax, resource) {
-		if (_.isString(resource))
-			resource = elems.create('snippet', resource);
-		
-		var elem = new ParsedElement(node, syntax, resource);
-		var utils = zen_coding.require('utils');
-		var res = zen_coding.require('resources');
-		
-		var data = resource ? resource.data : res.getSnippet(syntax, elem.name);
-		elem.value = utils.replaceUnescapedSymbol(data, '|', utils.getCaretPlaceholder());
-		
-		// override some attributes
-		elem.addAttribute('id', utils.getCaretPlaceholder());
-		elem.addAttribute('class', utils.getCaretPlaceholder());
-		elem.copyAttributes(node);
-		
-		return elem;
-	});
-})();/**
- * <code>ZenNode</code> — an element in final transformation process which will 
- * be used to generate output
- * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- */
-(function(){
 	/**
-	 * Test if text contains output placeholder $#
-	 * @param {String} text
+	 * Simple CSS commenting
+	 * @param {IZenEditor} editor
+	 * @return {Boolean} Returns <code>true</code> if comment was toggled
+	 */
+	function toggleCSSComment(editor) {
+		/** @type Range */
+		var range = require('range').create(editor.getSelectionRange());
+		var info = require('editorUtils').outputInfo(editor);
+			
+		if (!range.length()) {
+			// no selection, try to get current rule
+			/** @type CSSRule */
+			var rule = require('cssEditTree').parseFromPosition(info.content, editor.getCaretPos());
+			if (rule) {
+				var property = rule.itemFromPosition(editor.getCaretPos(), true);
+				range = property 
+					? property.range(true) 
+					: require('range').create(rule.nameRange(true).start, rule.source);
+			}
+		}
+		
+		if (!range.length()) {
+			// still no selection, get current line
+			range = require('range').create(editor.getCurrentLineRange());
+			require('utils').narrowToNonSpace(info.content, range);
+		}
+		
+		return genericCommentToggle(editor, '/*', '*/', range);
+	}
+
+	/**
+	 * Search for nearest comment in <code>str</code>, starting from index <code>from</code>
+	 * @param {String} text Where to search
+	 * @param {Number} from Search start index
+	 * @param {String} start_token Comment start string
+	 * @param {String} end_token Comment end string
+	 * @return {Range} Returns null if comment wasn't found
+	 */
+	function searchComment(text, from, startToken, endToken) {
+		var commentStart = -1;
+		var commentEnd = -1;
+		
+		var hasMatch = function(str, start) {
+			return text.substr(start, str.length) == str;
+		};
+			
+		// search for comment start
+		while (from--) {
+			if (hasMatch(startToken, from)) {
+				commentStart = from;
+				break;
+			}
+		}
+		
+		if (commentStart != -1) {
+			// search for comment end
+			from = commentStart;
+			var contentLen = text.length;
+			while (contentLen >= from++) {
+				if (hasMatch(endToken, from)) {
+					commentEnd = from + endToken.length;
+					break;
+				}
+			}
+		}
+		
+		return (commentStart != -1 && commentEnd != -1) 
+			? require('range').create(commentStart, commentEnd - commentStart) 
+			: null;
+	}
+
+	/**
+	 * Generic comment toggling routine
+	 * @param {zen_editor} editor
+	 * @param {String} commentStart Comment start token
+	 * @param {String} commentEnd Comment end token
+	 * @param {Range} range Selection range
 	 * @return {Boolean}
 	 */
-	function hasOutputPlaceholder(text) {
-		for (var i = 0, il = text.length; i < il; i++) {
-			var ch = text.charAt(i);
-			if (ch == '\\') { // escaped char
-				i++;
-				continue;
-			} else if (ch == '$' && text.charAt(i + 1) == '#') {
+	function genericCommentToggle(editor, commentStart, commentEnd, range) {
+		var editorUtils = require('editorUtils');
+		var content = editorUtils.outputInfo(editor).content;
+		var caretPos = editor.getCaretPos();
+		var newContent = null;
+		
+		var utils = require('utils');
+			
+		/**
+		 * Remove comment markers from string
+		 * @param {Sting} str
+		 * @return {String}
+		 */
+		function removeComment(str) {
+			return str
+				.replace(new RegExp('^' + utils.escapeForRegexp(commentStart) + '\\s*'), function(str){
+					caretPos -= str.length;
+					return '';
+				}).replace(new RegExp('\\s*' + utils.escapeForRegexp(commentEnd) + '$'), '');
+		}
+		
+		// first, we need to make sure that this substring is not inside 
+		// comment
+		var commentRange = searchComment(content, caretPos, commentStart, commentEnd);
+		if (commentRange && commentRange.overlap(range)) {
+			// we're inside comment, remove it
+			range = commentRange;
+			newContent = removeComment(range.substring(content));
+		} else {
+			// should add comment
+			// make sure that there's no comment inside selection
+			newContent = commentStart + ' ' +
+				range.substring(content)
+					.replace(new RegExp(utils.escapeForRegexp(commentStart) + '\\s*|\\s*' + utils.escapeForRegexp(commentEnd), 'g'), '') +
+				' ' + commentEnd;
+				
+			// adjust caret position
+			caretPos += commentStart.length + 1;
+		}
+
+		// replace editor content
+		if (newContent !== null) {
+			editor.setCaretPos(range.start);
+			editor.replaceContent(editorUtils.unindent(editor, newContent), range.start, range.end);
+			editor.setCaretPos(caretPos);
+			return true;
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Toggle comment on current editor's selection or HTML tag/CSS rule
+	 * @param {IZenEditor} editor
+	 */
+	require('actions').add('toggle_comment', function(editor) {
+		var info = require('editorUtils').outputInfo(editor);
+		if (info.syntax == 'css') {
+			// in case our editor is good enough and can recognize syntax from 
+			// current token, we have to make sure that cursor is not inside
+			// 'style' attribute of html element
+			var caretPos = editor.getCaretPos();
+			var pair = require('html_matcher').getTags(info.content, caretPos);
+			if (pair && pair[0] && pair[0].type == 'tag' && 
+					pair[0].start <= caretPos && pair[0].end >= caretPos) {
+				info.syntax = 'html';
+			}
+		}
+		
+		if (info.syntax == 'css')
+			return toggleCSSComment(editor);
+		
+		return toggleHTMLComment(editor);
+	});
+});/**
+ * Move between next/prev edit points. 'Edit points' are places between tags 
+ * and quotes of empty attributes in html
+ * @constructor
+ * 
+ * @memberOf __editPointActionDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Search for new caret insertion point
+	 * @param {zen_editor} editor Editor instance
+	 * @param {Number} inc Search increment: -1 — search left, 1 — search right
+	 * @param {Number} offset Initial offset relative to current caret position
+	 * @return {Number} Returns -1 if insertion point wasn't found
+	 */
+	function findNewEditPoint(editor, inc, offset) {
+		inc = inc || 1;
+		offset = offset || 0;
+		
+		var curPoint = editor.getCaretPos() + offset;
+		var content = String(editor.getContent());
+		var maxLen = content.length;
+		var nextPoint = -1;
+		var reEmptyLine = /^\s+$/;
+		
+		function getLine(ix) {
+			var start = ix;
+			while (start >= 0) {
+				var c = content.charAt(start);
+				if (c == '\n' || c == '\r')
+					break;
+				start--;
+			}
+			
+			return content.substring(start, ix);
+		}
+			
+		while (curPoint <= maxLen && curPoint >= 0) {
+			curPoint += inc;
+			var curChar = content.charAt(curPoint);
+			var nextChar = content.charAt(curPoint + 1);
+			var prevChar = content.charAt(curPoint - 1);
+				
+			switch (curChar) {
+				case '"':
+				case '\'':
+					if (nextChar == curChar && prevChar == '=') {
+						// empty attribute
+						nextPoint = curPoint + 1;
+					}
+					break;
+				case '>':
+					if (nextChar == '<') {
+						// between tags
+						nextPoint = curPoint + 1;
+					}
+					break;
+				case '\n':
+				case '\r':
+					// empty line
+					if (reEmptyLine.test(getLine(curPoint - 1))) {
+						nextPoint = curPoint;
+					}
+					break;
+			}
+			
+			if (nextPoint != -1)
+				break;
+		}
+		
+		return nextPoint;
+	}
+	
+	/** @type zen_coding.actions */
+	var actions = require('actions');
+	
+	/**
+	 * Move caret to previous edit point
+	 * @param {IZenEditor} editor Editor instance
+	 */
+	actions.add('prev_edit_point', function(editor) {
+		var curPos = editor.getCaretPos();
+		var newPoint = findNewEditPoint(editor, -1);
+			
+		if (newPoint == curPos)
+			// we're still in the same point, try searching from the other place
+			newPoint = findNewEditPoint(editor, -1, -2);
+		
+		if (newPoint != -1) {
+			editor.setCaretPos(newPoint);
+			return true;
+		}
+		
+		return false;
+	}, {label: 'Previous Edit Point'});
+	
+	/**
+	 * Move caret to next edit point
+	 * @param {IZenEditor} editor Editor instance
+	 */
+	actions.add('next_edit_point', function(editor) {
+		var newPoint = findNewEditPoint(editor, 1);
+		if (newPoint != -1)
+			editor.setCaretPos(newPoint);
+	});
+});/**
+ * Actions that use stream parsers and tokenizers for traversing:
+ * -- Search for next/previous items in HTML
+ * -- Search for next/previous items in CSS
+ * @constructor
+ * @memberOf __zenSelectItemAction
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	var startTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/;
+	
+	/**
+	 * Generic function for searching for items to select
+	 * @param {IZenEditor} editor
+	 * @param {Boolean} isBackward Search backward (search forward otherwise)
+	 * @param {Function} extractFn Function that extracts item content
+	 * @param {Function} rangeFn Function that search for next token range
+	 */
+	function findItem(editor, isBackward, extractFn, rangeFn) {
+		var range = require('range');
+		var content = require('editorUtils').outputInfo(editor).content;
+		
+		var contentLength = content.length;
+		var itemRange, rng;
+		/** @type Range */
+		var prevRange = range.create(-1, 0);
+		/** @type Range */
+		var sel = range.create(editor.getSelectionRange());
+		
+		var searchPos = sel.start, loop = 100000; // endless loop protection
+		while (searchPos >= 0 && searchPos < contentLength && --loop > 0) {
+			if ( (itemRange = extractFn(content, searchPos, isBackward)) ) {
+				if (prevRange.equal(itemRange)) {
+					break;
+				}
+				
+				prevRange = itemRange.clone();
+				rng = rangeFn(itemRange.substring(content), itemRange.start, sel.clone());
+				
+				if (rng) {
+					editor.createSelection(rng.start, rng.end);
+					return true;
+				} else {
+					searchPos = isBackward ? itemRange.start : itemRange.end - 1;
+				}
+			}
+			
+			searchPos += isBackward ? -1 : 1;
+		}
+		
+		return false;
+	}
+	
+	// XXX HTML section
+	
+	/**
+	 * Find next HTML item
+	 * @param {IZenEditor} editor
+	 */
+	function findNextHTMLItem(editor) {
+		var isFirst = true;
+		return findItem(editor, false, function(content, searchPos){
+			if (isFirst) {
+				isFirst = false;
+				return findOpeningTagFromPosition(content, searchPos);
+			} else {
+				return getOpeningTagFromPosition(content, searchPos);
+			}
+		}, function(tag, offset, selRange) {
+			return getRangeForHTMLItem(tag, offset, selRange, false);
+		});
+	}
+	
+	/**
+	 * Find previous HTML item
+	 * @param {zen_editor} editor
+	 */
+	function findPrevHTMLItem(editor) {
+		return findItem(editor, true, getOpeningTagFromPosition, function (tag, offset, selRange) {
+			return getRangeForHTMLItem(tag, offset, selRange, true);
+		});
+	}
+	
+	/**
+	 * Creates possible selection ranges for HTML tag
+	 * @param {String} source Original HTML source for tokens
+	 * @param {Array} tokens List of HTML tokens
+	 * @returns {Array}
+	 */
+	function makePossibleRangesHTML(source, tokens, offset) {
+		offset = offset || 0;
+		var range = require('range');
+		var result = [];
+		var attrStart = -1, attrName = '', attrValue = '', attrValueRange, tagName;
+		_.each(tokens, function(tok) {
+			switch (tok.type) {
+				case 'tag':
+					tagName = source.substring(tok.start, tok.end);
+					if (/^<[\w\:\-]/.test(tagName)) {
+						// add tag name
+						result.push(range.create({
+							start: tok.start + 1, 
+							end: tok.end
+						}));
+					}
+					break;
+				case 'attribute':
+					attrStart = tok.start;
+					attrName = source.substring(tok.start, tok.end);
+					break;
+					
+				case 'string':
+					// attribute value
+					// push full attribute first
+					 result.push(range.create(attrStart, tok.end - attrStart));
+					 
+					 attrValueRange = range.create(tok);
+					 attrValue = attrValueRange.substring(source);
+					 
+					 // is this a quoted attribute?
+					 if (isQuote(attrValue.charAt(0)))
+						 attrValueRange.start++;
+					 
+					 if (isQuote(attrValue.charAt(attrValue.length - 1)))
+						 attrValueRange.end--;
+					 
+					 result.push(attrValueRange);
+					 
+					 if (attrName == 'class') {
+						 result = result.concat(classNameRanges(attrValueRange.substring(source), attrValueRange.start));
+					 }
+					 
+					break;
+			}
+		});
+		
+		// offset ranges
+		_.each(result, function(r) {
+			r.shift(offset);
+		});
+		
+		return _.chain(result)
+			.filter(function(item) {        // remove empty
+				return !!item.length();
+			})
+			.uniq(false, function(item) {   // remove duplicates
+				return item.toString();
+			})
+			.value();
+	}
+	
+	/**
+	 * Returns ranges of class names in "class" attribute value
+	 * @param {String} className
+	 * @returns {Array}
+	 */
+	function classNameRanges(className, offset) {
+		offset = offset || 0;
+		var result = [];
+		/** @type StringStream */
+		var stream = require('stringStream').create(className);
+		var range = require('range');
+		
+		// skip whitespace
+		stream.eatSpace();
+		stream.start = stream.pos;
+		
+		var ch;
+		while (ch = stream.next()) {
+			if (/[\s\u00a0]/.test(ch)) {
+				result.push(range.create(stream.start + offset, stream.pos - stream.start - 1));
+				stream.eatSpace();
+				stream.start = stream.pos;
+			}
+		}
+		
+		result.push(range.create(stream.start + offset, stream.pos - stream.start));
+		return result;
+	}
+	
+	/**
+	 * Returns best HTML tag range match for current selection
+	 * @param {String} tag Tag declaration
+	 * @param {Number} offset Tag's position index inside content
+	 * @param {Range} selRange Selection range
+	 * @return {Range} Returns range if next item was found, <code>null</code> otherwise
+	 */
+	function getRangeForHTMLItem(tag, offset, selRange, isBackward) {
+		var ranges = makePossibleRangesHTML(tag, require('xmlParser').parse(tag), offset);
+		
+		if (isBackward)
+			ranges.reverse();
+		
+		// try to find selected range
+		var curRange = _.find(ranges, function(r) {
+			return r.equal(selRange);
+		});
+		
+		if (curRange) {
+			var ix = _.indexOf(ranges, curRange);
+			if (ix < ranges.length - 1)
+				return ranges[ix + 1];
+			
+			return null;
+		}
+		
+		// no selected range, find nearest one
+		if (isBackward)
+			return _.find(ranges, function(r) {
+				return r.start < selRange.start;
+			});
+		
+		// search forward
+		return _.find(ranges, function(r) {
+			return r.end > selRange.end;
+		});
+	}
+	
+	/**
+	 * Search for opening tag in content, starting at specified position
+	 * @param {String} html Where to search tag
+	 * @param {Number} pos Character index where to start searching
+	 * @return {Range} Returns range if valid opening tag was found,
+	 * <code>null</code> otherwise
+	 */
+	function findOpeningTagFromPosition(html, pos) {
+		var tag;
+		while (pos >= 0) {
+			if (tag = getOpeningTagFromPosition(html, pos))
+				return tag;
+			pos--;
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * @param {String} html Where to search tag
+	 * @param {Number} pos Character index where to start searching
+	 * @return {Range} Returns range if valid opening tag was found,
+	 * <code>null</code> otherwise
+	 */
+	function getOpeningTagFromPosition(html, pos) {
+		var m;
+		if (html.charAt(pos) == '<' && (m = html.substring(pos, html.length).match(startTag))) {
+			return require('range').create(pos, m[0]);
+		}
+	}
+	
+	function isQuote(ch) {
+		return ch == '"' || ch == "'";
+	}
+	
+	/**
+	 * Makes all possible selection ranges for specified CSS property
+	 * @param {CSSProperty} property
+	 * @returns {Array}
+	 */
+	function makePossibleRangesCSS(property) {
+		// find all possible ranges, sorted by position and size
+		var valueRange = property.valueRange(true);
+		var result = [property.range(true), valueRange];
+		var stringStream = require('stringStream');
+		var cssEditTree = require('cssEditTree');
+		var range = require('range');
+		
+		// locate parts of complex values.
+		// some examples:
+		// – 1px solid red: 3 parts
+		// – arial, sans-serif: enumeration, 2 parts
+		// – url(image.png): function value part
+		var value = property.value();
+		_.each(property.valueParts(), function(r) {
+			// add absolute range
+			var clone = r.clone();
+			result.push(clone.shift(valueRange.start));
+			
+			/** @type StringStream */
+			var stream = stringStream.create(r.substring(value));
+			if (stream.match(/^[\w\-]+\(/, true)) {
+				// we have a function, find values in it.
+				// but first add function contents
+				stream.start = stream.pos;
+				stream.skipTo(')');
+				var fnBody = stream.current();
+				result.push(range.create(clone.start + stream.start, fnBody));
+				
+				// find parts
+				_.each(cssEditTree.findParts(fnBody), function(part) {
+					result.push(range.create(clone.start + stream.start + part.start, part.substring(fnBody)));
+				});
+			}
+		});
+		
+		// optimize result: remove empty ranges and duplicates
+		return _.chain(result)
+			.filter(function(item) {
+				return !!item.length();
+			})
+			.uniq(false, function(item) {
+				return item.toString();
+			})
+			.value();
+	}
+	
+	/**
+	 * Tries to find matched CSS property and nearest range for selection
+	 * @param {CSSRule} rule
+	 * @param {Range} selRange
+	 * @param {Boolean} isBackward
+	 * @returns {Range}
+	 */
+	function matchedRangeForCSSProperty(rule, selRange, isBackward) {
+		/** @type CSSProperty */
+		var property = null;
+		var possibleRanges, curRange = null, ix;
+		var list = rule.list();
+		var searchFn, nearestItemFn;
+		
+		if (isBackward) {
+			list.reverse();
+			searchFn = function(p) {
+				return p.range(true).start <= selRange.start;
+			};
+			nearestItemFn = function(r) {
+				return r.start < selRange.start;
+			};
+		} else {
+			searchFn = function(p) {
+				return p.range(true).end >= selRange.end;
+			};
+			nearestItemFn = function(r) {
+				return r.end > selRange.start;
+			};
+		}
+		
+		// search for nearest to selection CSS property
+		while (property = _.find(list, searchFn)) {
+			possibleRanges = makePossibleRangesCSS(property);
+			if (isBackward)
+				possibleRanges.reverse();
+			
+			// check if any possible range is already selected
+			curRange = _.find(possibleRanges, function(r) {
+				return r.equal(selRange);
+			});
+			
+			if (!curRange) {
+				// no selection, select nearest item
+				if (curRange = _.find(possibleRanges, nearestItemFn))
+					break;
+			} else {
+				ix = _.indexOf(possibleRanges, curRange);
+				if (ix != possibleRanges.length - 1) {
+					curRange = possibleRanges[ix + 1];
+					break;
+				}
+			}
+			
+			curRange = null;
+			selRange.start = selRange.end = isBackward 
+				? property.range(true).start - 1
+				: property.range(true).end + 1;
+		}
+		
+		return curRange;
+	}
+	
+	function findNextCSSItem(editor) {
+		return findItem(editor, false, require('cssEditTree').extractRule, getRangeForNextItemInCSS);
+	}
+	
+	function findPrevCSSItem(editor) {
+		return findItem(editor, true, require('cssEditTree').extractRule, getRangeForPrevItemInCSS);
+	}
+	
+	/**
+	 * Returns range for item to be selected in CSS after current caret 
+	 * (selection) position
+	 * @param {String} rule CSS rule declaration
+	 * @param {Number} offset Rule's position index inside content
+	 * @param {Range} selRange Selection range
+	 * @return {Range} Returns range if next item was found, <code>null</code> otherwise
+	 */
+	function getRangeForNextItemInCSS(rule, offset, selRange) {
+		var tree = require('cssEditTree').parse(rule, {
+			offset: offset
+		});
+		
+		// check if selector is matched
+		var range = tree.nameRange(true);
+		if (selRange.end < range.end) {
+			return range;
+		}
+		
+		return matchedRangeForCSSProperty(tree, selRange, false);
+	}
+	
+	/**
+	 * Returns range for item to be selected in CSS before current caret 
+	 * (selection) position
+	 * @param {String} rule CSS rule declaration
+	 * @param {Number} offset Rule's position index inside content
+	 * @param {Range} selRange Selection range
+	 * @return {Range} Returns range if previous item was found, <code>null</code> otherwise
+	 */
+	function getRangeForPrevItemInCSS(rule, offset, selRange) {
+		var tree = require('cssEditTree').parse(rule, {
+			offset: offset
+		});
+		
+		var curRange = matchedRangeForCSSProperty(tree, selRange, true);
+		
+		if (!curRange) {
+			// no matched property, try to match selector
+			var range = tree.nameRange(true);
+			if (selRange.start > range.start) {
+				return range;
+			}
+		}
+		
+		return curRange;
+	}
+	
+	// XXX register actions
+	var actions = require('actions');
+	actions.add('select_next_item', function(editor){
+		if (editor.getSyntax() == 'css')
+			return findNextCSSItem(editor);
+		else
+			return findNextHTMLItem(editor);
+	});
+	
+	actions.add('select_previous_item', function(editor){
+		if (editor.getSyntax() == 'css')
+			return findPrevCSSItem(editor);
+		else
+			return findPrevHTMLItem(editor);
+	});
+});/**
+ * HTML pair matching (balancing) actions
+ * @constructor
+ * @memberOf __matchPairActionDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	/** @type zen_coding.actions */
+	var actions = require('actions');
+	var matcher = require('html_matcher');
+	
+	/**
+	 * Find and select HTML tag pair
+	 * @param {IZenEditor} editor Editor instance
+	 * @param {String} direction Direction of pair matching: 'in' or 'out'. 
+	 * Default is 'out'
+	 */
+	function matchPair(editor, direction, syntax) {
+		direction = String((direction || 'out').toLowerCase());
+		var info = require('editorUtils').outputInfo(editor, syntax);
+		syntax = info.syntax;
+		
+		var range = require('range');
+		/** @type Range */
+		var selRange = range.create(editor.getSelectionRange());
+		var content = info.content;
+		/** @type Range */
+		var tagRange = null;
+		/** @type Range */
+		var _r;
+		
+		var oldOpenTag = matcher.last_match['opening_tag'];
+		var oldCloseTag = matcher.last_match['closing_tag'];
+			
+		if (direction == 'in' && oldOpenTag && selRange.length()) {
+//			user has previously selected tag and wants to move inward
+			if (!oldCloseTag) {
+//				unary tag was selected, can't move inward
+				return false;
+			} else if (oldOpenTag.start == selRange.start) {
+				if (content.charAt(oldOpenTag.end) == '<') {
+//					test if the first inward tag matches the entire parent tag's content
+					_r = range.create(matcher.find(content, oldOpenTag.end + 1, syntax));
+					if (_r.start == oldOpenTag.end && _r.end == oldCloseTag.start) {
+						tagRange = range.create(matcher(content, oldOpenTag.end + 1, syntax));
+					} else {
+						tagRange = range.create(oldOpenTag.end, oldCloseTag.start - oldOpenTag.end);
+					}
+				} else {
+					tagRange = range.create(oldOpenTag.end, oldCloseTag.start - oldOpenTag.end);
+				}
+			} else {
+				var newCursor = content.substring(0, oldCloseTag.start).indexOf('<', oldOpenTag.end);
+				var searchPos = newCursor != -1 ? newCursor + 1 : oldOpenTag.end;
+				tagRange = range.create(matcher(content, searchPos, syntax));
+			}
+		} else {
+			tagRange = range.create(matcher(content, selRange.end, syntax));
+		}
+		
+		if (tagRange && tagRange.start != -1) {
+			editor.createSelection(tagRange.start, tagRange.end);
+			return true;
+		}
+		
+		return false;
+	}
+	
+	actions.add('match_pair', matchPair, {hidden: true});
+	actions.add('match_pair_inward', function(editor){
+		return matchPair(editor, 'in');
+	}, {label: 'HTML/Match Pair Tag (inward)'});
+
+	actions.add('match_pair_outward', function(editor){
+		return matchPair(editor, 'out');
+	}, {label: 'HTML/Match Pair Tag (outward)'});
+	
+	/**
+	 * Moves caret to matching opening or closing tag
+	 * @param {IZenEditor} editor
+	 */
+	actions.add('matching_pair', function(editor) {
+		var content = String(editor.getContent());
+		var caretPos = editor.getCaretPos();
+		
+		if (content.charAt(caretPos) == '<') 
+			// looks like caret is outside of tag pair  
+			caretPos++;
+			
+		var tags = matcher.getTags(content, caretPos, String(editor.getProfileName()));
+			
+		if (tags && tags[0]) {
+			// match found
+			var openTag = tags[0];
+			var closeTag = tags[1];
+				
+			if (closeTag) { // exclude unary tags
+				if (openTag.start <= caretPos && openTag.end >= caretPos) {
+					editor.setCaretPos(closeTag.start);
+					return true;
+				} else if (closeTag.start <= caretPos && closeTag.end >= caretPos){
+					editor.setCaretPos(openTag.start);
+					return true;
+				}
+			}
+		}
+		
+		return false;
+	}, {label: 'HTML/Go To Matching Tag Pair'});
+});/**
+ * Gracefully removes tag under cursor
+ * 
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.exec(function(require, _) {
+	require('actions').add('remove_tag', function(editor) {
+		var utils = require('utils');
+		var info = require('editorUtils').outputInfo(editor);
+		
+		// search for tag
+		var pair = require('html_matcher').getTags(info.content, editor.getCaretPos(), info.profile);
+		if (pair && pair[0]) {
+			if (!pair[1]) {
+				// simply remove unary tag
+				editor.replaceContent(utils.getCaretPlaceholder(), pair[0].start, pair[0].end);
+			} else {
+				// remove tag and its newlines
+				/** @type Range */
+				var tagContentRange = utils.narrowToNonSpace(info.content, pair[0].end, pair[1].start - pair[0].end);
+				/** @type Range */
+				var startLineBounds = utils.findNewlineBounds(info.content, tagContentRange.start);
+				var startLinePad = utils.getLinePadding(startLineBounds.substring(info.content));
+				var tagContent = tagContentRange.substring(info.content);
+				
+				tagContent = utils.unindentString(tagContent, startLinePad);
+				editor.replaceContent(utils.getCaretPlaceholder() + tagContent, pair[0].start, pair[1].end);
+			}
+			
+			return true;
+		}
+		
+		return false;
+	}, {label: 'HTML/Remove Tag'});
+});
+/**
+ * Splits or joins tag, e.g. transforms it into a short notation and vice versa:<br>
+ * &lt;div&gt;&lt;/div&gt; → &lt;div /&gt; : join<br>
+ * &lt;div /&gt; → &lt;div&gt;&lt;/div&gt; : split
+ * @param {Function} require
+ * @param {Underscore} _
+ * @memberOf __splitJoinTagAction
+ * @constructor
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * @param {IZenEditor} editor
+	 * @param {Object} profile
+	 * @param {Object} htmlMatch
+	 */
+	function joinTag(editor, profile, htmlMatch) {
+		/** @type zen_coding.utils */
+		var utils = require('utils');
+		
+		var closingSlash = (profile.self_closing_tag === true) ? '/' : ' /';
+		var content = htmlMatch[0].full_tag.replace(/\s*>$/, closingSlash + '>');
+		
+		// add caret placeholder
+		if (content.length + htmlMatch[0].start < editor.getCaretPos())
+			content += utils.getCaretPlaceholder();
+		else {
+			var d = editor.getCaretPos() - htmlMatch[0].start;
+			content = utils.replaceSubstring(content, utils.getCaretPlaceholder(), d);
+		}
+		
+		editor.replaceContent(content, htmlMatch[0].start, htmlMatch[1].end);
+		return true;
+	}
+	
+	function splitTag(editor, profile, htmlMatch) {
+		/** @type zen_coding.utils */
+		var utils = require('utils');
+		
+		var nl = utils.getNewline();
+		var pad = require('resources').getVariable('indentation');
+		var caret = utils.getCaretPlaceholder();
+		
+		// define tag content depending on profile
+		var tagContent = (profile.tag_nl === true) ? nl + pad + caret + nl : caret;
+				
+		var content = htmlMatch[0].full_tag.replace(/\s*\/>$/, '>') + tagContent + '</' + htmlMatch[0].name + '>';
+		editor.replaceContent(content, htmlMatch[0].start, htmlMatch[0].end);
+		return true;
+	}
+	
+	require('actions').add('split_join_tag', function(editor, profileName) {
+		var matcher = require('html_matcher');
+		
+		var info = require('editorUtils').outputInfo(editor, null, profileName);
+		var profile = require('profile').get(info.profile);
+		
+		// find tag at current position
+		var pair = matcher.getTags(info.content, editor.getCaretPos(), info.profile);
+		if (pair && pair[0]) {
+			if (pair[1]) { // join tag
+				return joinTag(editor, profile, pair);
+			}
+			return splitTag(editor, profile, pair);
+		}
+		
+		return false;
+	}, {label: 'HTML/Split\\Join Tag Declaration'});
+});/**
+ * Reflect CSS value: takes rule's value under caret and pastes it for the same 
+ * rules with vendor prefixes
+ * @constructor
+ * @memberOf __reflectCSSActionDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('reflectCSSValue', function(require, _) {
+	/**
+	 * @type HandlerList List of registered handlers
+	 */
+	var handlers = require('handlerList').create();
+	
+	require('actions').add('reflect_css_value', function(editor) {
+		if (editor.getSyntax() != 'css') return false;
+		
+		return require('actionUtils').compoundUpdate(editor, doCSSReflection(editor));
+	}, {label: 'CSS/Reflect Value'});
+	
+	function doCSSReflection(editor) {
+		/** @type zen_coding.cssEditTree */
+		var cssEditTree = require('cssEditTree');
+		var outputInfo = require('editorUtils').outputInfo(editor);
+		var caretPos = editor.getCaretPos();
+		
+		var cssRule = cssEditTree.parseFromPosition(outputInfo.content, caretPos);
+		if (!cssRule) return;
+		
+		var property = cssRule.itemFromPosition(caretPos, true);
+		// no property under cursor, nothing to reflect
+		if (!property) return;
+		
+		var oldRule = cssRule.source;
+		var offset = cssRule.options.offset;
+		var caretDelta = caretPos - offset - property.range().start;
+		
+		handlers.exec(false, [property]);
+		
+		if (oldRule !== cssRule.source) {
+			return {
+				data:  cssRule.source,
+				start: offset,
+				end:   offset + oldRule.length,
+				caret: offset + property.range().start + caretDelta
+			};
+		}
+	}
+	
+	/**
+	 * Returns regexp that should match reflected CSS property names
+	 * @param {String} name Current CSS property name
+	 * @return {RegExp}
+	 */
+	function getReflectedCSSName(name) {
+		name = require('cssEditTree').baseName(name);
+		var vendorPrefix = '^(?:\\-\\w+\\-)?', m;
+		
+		if (name == 'opacity' || name == 'filter') {
+			return new RegExp(vendorPrefix + '(?:opacity|filter)$');
+		} else if (m = name.match(/^border-radius-(top|bottom)(left|right)/)) {
+			// Mozilla-style border radius
+			return new RegExp(vendorPrefix + '(?:' + name + '|border-' + m[1] + '-' + m[2] + '-radius)$');
+		} else if (m = name.match(/^border-(top|bottom)-(left|right)-radius/)) { 
+			return new RegExp(vendorPrefix + '(?:' + name + '|border-radius-' + m[1] + m[2] + ')$');
+		}
+		
+		return new RegExp(vendorPrefix + name + '$');
+	}
+	
+	/**
+	 * Reflects value from <code>donor</code> into <code>receiver</code>
+	 * @param {CSSProperty} donor Donor CSS property from which value should
+	 * be reflected
+	 * @param {CSSProperty} receiver Property that should receive reflected 
+	 * value from donor
+	 */
+	function reflectValue(donor, receiver) {
+		var value = getReflectedValue(donor.name(), donor.value(), 
+				receiver.name(), receiver.value());
+		
+		receiver.value(value);
+	}
+	
+	/**
+	 * Returns value that should be reflected for <code>refName</code> CSS property
+	 * from <code>curName</code> property. This function is used for special cases,
+	 * when the same result must be achieved with different properties for different
+	 * browsers. For example: opаcity:0.5; → filter:alpha(opacity=50);<br><br>
+	 * 
+	 * This function does value conversion between different CSS properties
+	 * 
+	 * @param {String} curName Current CSS property name
+	 * @param {String} curValue Current CSS property value
+	 * @param {String} refName Receiver CSS property's name 
+	 * @param {String} refValue Receiver CSS property's value
+	 * @return {String} New value for receiver property
+	 */
+	function getReflectedValue(curName, curValue, refName, refValue) {
+		var cssEditTree = require('cssEditTree');
+		var utils = require('utils');
+		curName = cssEditTree.baseName(curName);
+		refName = cssEditTree.baseName(refName);
+		
+		if (curName == 'opacity' && refName == 'filter') {
+			return refValue.replace(/opacity=[^)]*/i, 'opacity=' + Math.floor(parseFloat(curValue) * 100));
+		} else if (curName == 'filter' && refName == 'opacity') {
+			var m = curValue.match(/opacity=([^)]*)/i);
+			return m ? utils.prettifyNumber(parseInt(m[1]) / 100) : refValue;
+		}
+		
+		return curValue;
+	}
+	
+	// XXX add default handler
+	handlers.add(function(property) {
+		var reName = getReflectedCSSName(property.name());
+		_.each(property.parent.list(), function(p) {
+			if (reName.test(p.name())) {
+				reflectValue(property, p);
+			}
+		});
+	}, {order: -1});
+	
+	return {
+		/**
+		 * Adds custom reflect handler. The passed function will receive matched
+		 * CSS property (as <code>CSSEditElement</code> object) and should
+		 * return <code>true</code> if it was performed successfully (handled 
+		 * reflection), <code>false</code> otherwise.
+		 * @param {Function} fn
+		 * @param {Object} options
+		 */
+		addHandler: function(fn, options) {
+			handlers.add(fn, options);
+		},
+		
+		/**
+		 * Removes registered handler
+		 * @returns
+		 */
+		removeHandler: function(fn) {
+			handlers.remove(fn, options);
+		}
+	};
+});/**
+ * Evaluates simple math expression under caret
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+zen_coding.exec(function(require, _) {
+	require('actions').add('evaluate_math_expression', function(editor) {
+		var actionUtils = require('actionUtils');
+		var utils = require('utils');
+		
+		var content = String(editor.getContent());
+		var chars = '.+-*/\\';
+		
+		/** @type Range */
+		var sel = require('range').create(editor.getSelectionRange());
+		if (!sel.length()) {
+			sel = actionUtils.findExpressionBounds(editor, function(ch) {
+				return utils.isNumeric(ch) || chars.indexOf(ch) != -1;
+			});
+		}
+		
+		if (sel && sel.length()) {
+			var expr = sel.substring(content);
+			
+			// replace integral division: 11\2 => Math.round(11/2) 
+			expr = expr.replace(/([\d\.\-]+)\\([\d\.\-]+)/g, 'Math.round($1/$2)');
+			
+			try {
+				var result = utils.prettifyNumber(new Function('return ' + expr)());
+				editor.replaceContent(result, sel.start, sel.end);
+				editor.setCaretPos(sel.start + result.length);
+				return true;
+			} catch (e) {}
+		}
+		
+		return false;
+	}, {label: 'Numbers/Evaluate Math Expression'});
+});
+/**
+ * Increment/decrement number under cursor
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Extract number from current caret position of the <code>editor</code> and
+	 * increment it by <code>step</code>
+	 * @param {IZenEditor} editor
+	 * @param {Number} step Increment step (may be negative)
+	 */
+	function incrementNumber(editor, step) {
+		var utils = require('utils');
+		var actionUtils = require('actionUtils');
+		
+		var hasSign = false;
+		var hasDecimal = false;
+			
+		var r = actionUtils.findExpressionBounds(editor, function(ch, pos, content) {
+			if (utils.isNumeric(ch))
+				return true;
+			if (ch == '.') {
+				// make sure that next character is numeric too
+				if (!utils.isNumeric(content.charAt(pos + 1)))
+					return false;
+				
+				return hasDecimal ? false : hasDecimal = true;
+			}
+			if (ch == '-')
+				return hasSign ? false : hasSign = true;
+				
+			return false;
+		});
+			
+		if (r && r.length()) {
+			var num = parseFloat(r.substring(String(editor.getContent())));
+			if (!isNaN(num)) {
+				num = utils.prettifyNumber(num + step);
+				editor.replaceContent(num, r.start, r.end);
+				editor.createSelection(r.start, r.start + num.length);
 				return true;
 			}
 		}
@@ -6315,334 +8852,1591 @@ zen_coding.define('parserUtils', function(require, _) {
 		return false;
 	}
 	
+	var actions = require('actions');
+	_.each([1, -1, 10, -10, 0.1, -0.1], function(num) {
+		var prefix = num > 0 ? 'increment' : 'decrement';
+		
+		actions.add(prefix + '_number_by_' + String(Math.abs(num)).replace('.', '').substring(0, 2), function(editor) {
+			return incrementNumber(editor, num);
+		}, {label: 'Numbers/' + prefix.charAt(0).toUpperCase() + prefix.substring(1) + ' number by ' + Math.abs(num)});
+	});
+});/**
+ * Actions to insert line breaks. Some simple editors (like browser's 
+ * &lt;textarea&gt;, for example) do not provide such simple things
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	var actions = require('actions');
+	/** @type zen_coding.preferences */
+	var prefs = require('preferences');
+	
+	// setup default preferences
+	prefs.set('css.closeBraceIndentation', '\n',
+			'Indentation before closing brace of CSS rule. Some users prefere' 
+			+ 'indented closing brace of CSS rule for better readability. '
+			+ 'This preference’s value will be automatically inserted before '
+			+ 'closing brace when user adds newline in newly created CSS rule '
+			+ '(e.g. when “Insert formatted linebreak” action will be performed ' 
+			+ 'in CSS file). If you’re such user, you may want to write put a value ' 
+			+ 'like <code>\\n\\t</code> in this preference.');
+	
 	/**
-	 * Creates simplified tag from Zen Coding tag
-	 * @param {ParsedElement} elem
+	 * Inserts newline character with proper indentation in specific positions only.
+	 * @param {IZenEditor} editor
+	 * @return {Boolean} Returns <code>true</code> if line break was inserted 
 	 */
-	function ZenNode(elem) {
-		var elems = zen_coding.require('elements');
+	actions.add('insert_formatted_line_break_only', function(editor) {
+		var utils = require('utils');
+		/** @type zen_coding.resources */
+		var res = require('resources');
 		
-		this.type = elems.is(elem, 'parsedSnippet') ? 'snippet' : 'tag';
-		this.children = [];
-		this.counter = 1;
+		var info = require('editorUtils').outputInfo(editor);
+		var caretPos = editor.getCaretPos();
+		var nl = utils.getNewline();
 		
-		// copy attributes
-		_.each('name,real_name,is_repeating,repeat_by_lines,has_implicit_name'.split(','), function(p) {
-			this[p] = elem[p];
-		}, this);
+		if (info.syntax == 'html') {
+			var pad = res.getVariable('indentation');
+			// let's see if we're breaking newly created tag
+			var pair = require('html_matcher').getTags(info.content, caretPos, info.profile);
+			
+			if (pair[0] && pair[1] && pair[0].type == 'tag' && pair[0].end == caretPos && pair[1].start == caretPos) {
+				editor.replaceContent(nl + pad + utils.getCaretPlaceholder() + nl, caretPos);
+				return true;
+			}
+		} else if (info.syntax == 'css') {
+			/** @type String */
+			var content = info.content;
+			if (caretPos && content.charAt(caretPos - 1) == '{') {
+				var append = prefs.get('css.closeBraceIndentation');
+				var pad = res.getVariable('indentation');
+				
+				var hasCloseBrace = content.charAt(caretPos) == '}';
+				if (!hasCloseBrace) {
+					// do we really need special formatting here?
+					// check if this is really a newly created rule,
+					// look ahead for a closing brace
+					for (var i = caretPos, il = content.length, ch; i < il; i++) {
+						ch = content.charAt(i);
+						if (ch == '{') {
+							// ok, this is a new rule without closing brace
+							break;
+						}
+						
+						if (ch == '}') {
+							// not a new rule, just add indentation
+							append = '';
+							hasCloseBrace = true;
+							break;
+						}
+					}
+				}
+				
+				if (!hasCloseBrace) {
+					append += '}';
+				}
+				
+				// defining rule set
+				var insValue = nl + pad + utils.getCaretPlaceholder() + append;
+				editor.replaceContent(insValue, caretPos);
+				return true;
+			}
+		}
+			
+		return false;
+	}, {hidden: true});
+	
+	/**
+	 * Inserts newline character with proper indentation. This action is used in
+	 * editors that doesn't have indentation control (like textarea element) to 
+	 * provide proper indentation
+	 * @param {IZenEditor} editor Editor instance
+	 */
+	actions.add('insert_formatted_line_break', function(editor) {
+		if (!actions.run('insert_formatted_line_break_only', editor)) {
+			var utils = require('utils');
+			
+			var curPadding = require('editorUtils').getCurrentLinePadding(editor);
+			var content = String(editor.getContent());
+			var caretPos = editor.getCaretPos();
+			var len = content.length;
+			var nl = utils.getNewline();
+				
+			// check out next line padding
+			var lineRange = editor.getCurrentLineRange();
+			var nextPadding = '';
+				
+			for (var i = lineRange.end + 1, ch; i < len; i++) {
+				ch = content.charAt(i);
+				if (ch == ' ' || ch == '\t')
+					nextPadding += ch;
+				else
+					break;
+			}
+			
+			if (nextPadding.length > curPadding.length)
+				editor.replaceContent(nl + nextPadding, caretPos, caretPos, true);
+			else
+				editor.replaceContent(nl, caretPos);
+		}
 		
-		// create deep copy of attribute list so we can change
-		// their values in runtime without affecting other nodes
-		// created from the same tag
-		this.attributes = _.map(elem.attributes, function(a) {
-			return _.clone(a);
-		});
+		return true;
+	}, {hidden: true});
+});/**
+ * Merges selected lines or lines between XHTML tag pairs
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	require('actions').add('merge_lines', function(editor) {
+		var matcher = require('html_matcher');
+		var utils = require('utils');
+		var editorUtils = require('editorUtils');
+		var info = editorUtils.outputInfo(editor);
 		
-		/** @type {ParsedElement} Source element from which current tag was created */
-		this.source = elem;
+		/** @type Range */
+		var selection = require('range').create(editor.getSelectionRange());
+		if (!selection.length()) {
+			// find matching tag
+			var pair = matcher(info.content, editor.getCaretPos(), info.profile);
+			if (pair) {
+				selection.start = pair[0];
+				selection.end = pair[1];
+			}
+		}
 		
-		// relations
-		/** @type {ZenNode} */
-		this.parent = null;
-		/** @type {ZenNode} */
-		this.nextSibling = null;
-		/** @type {ZenNode} */
-		this.previousSibling = null;
+		if (selection.length()) {
+			// got range, merge lines
+			var text =  selection.substring(info.content);
+			var lines = utils.splitByLines(text);
+			
+			for (var i = 1; i < lines.length; i++) {
+				lines[i] = lines[i].replace(/^\s+/, '');
+			}
+			
+			text = lines.join('').replace(/\s{2,}/, ' ');
+			editor.replaceContent(text, selection.start, selection.end);
+			editor.createSelection(selection.start, selection.start + text.length);
+			
+			return true;
+		}
 		
-		// output params
-		this.start = '';
-		this.end = '';
-		this.content = elem.getContent() || '';
-		this.padding = '';
+		return false;
+	});
+});/**
+ * Encodes/decodes image under cursor to/from base64
+ * @param {IZenEditor} editor
+ * @since 0.65
+ * 
+ * @memberOf __base64ActionDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	require('actions').add('encode_decode_data_url', function(editor) {
+		var data = String(editor.getSelection());
+		var caretPos = editor.getCaretPos();
+			
+		if (!data) {
+			// no selection, try to find image bounds from current caret position
+			var text = String(editor.getContent()),  m;
+			while (caretPos-- >= 0) {
+				if (startsWith('src=', text, caretPos)) { // found <img src="">
+					if (m = text.substr(caretPos).match(/^(src=(["'])?)([^'"<>\s]+)\1?/)) {
+						data = m[3];
+						caretPos += m[1].length;
+					}
+					break;
+				} else if (startsWith('url(', text, caretPos)) { // found CSS url() pattern
+					if (m = text.substr(caretPos).match(/^(url\((['"])?)([^'"\)\s]+)\1?/)) {
+						data = m[3];
+						caretPos += m[1].length;
+					}
+					break;
+				}
+			}
+		}
+		
+		if (data) {
+			if (startsWith('data:', data))
+				return decodeFromBase64(editor, data, caretPos);
+			else
+				return encodeToBase64(editor, data, caretPos);
+		}
+		
+		return false;
+	}, {label: 'Encode\\Decode data:URL image'});
+	
+	/**
+	 * Test if <code>text</code> starts with <code>token</code> at <code>pos</code>
+	 * position. If <code>pos</code> is ommited, search from beginning of text 
+	 * @param {String} token Token to test
+	 * @param {String} text Where to search
+	 * @param {Number} pos Position where to start search
+	 * @return {Boolean}
+	 * @since 0.65
+	 */
+	function startsWith(token, text, pos) {
+		pos = pos || 0;
+		return text.charAt(pos) == token.charAt(0) && text.substr(pos, token.length) == token;
 	}
 	
-	ZenNode.prototype = {
-		/**
-		 * Add child node
-		 * @param {ZenNode} tag
-		 */
-		addChild: function(node) {
-			node.parent = this;
+	/**
+	 * Encodes image to base64
+	 * @requires zen_file
+	 * 
+	 * @param {zen_editor} editor
+	 * @param {String} imgPath Path to image
+	 * @param {Number} pos Caret position where image is located in the editor
+	 * @return {Boolean}
+	 */
+	function encodeToBase64(editor, imgPath, pos) {
+		var file = require('file');
+		var actionUtils = require('actionUtils');
+		
+		var editorFile = editor.getFilePath();
+		var defaultMimeType = 'application/octet-stream';
 			
-			// check for implicit name
-			if (node.has_implicit_name && this.isInline())
-				node.name = 'span';
+		if (editorFile === null) {
+			throw "You should save your file before using this action";
+		}
+		
+		// locate real image path
+		var realImgPath = file.locateFile(editorFile, imgPath);
+		if (realImgPath === null) {
+			throw "Can't find " + imgPath + ' file';
+		}
+		
+		var b64 = require('base64').encode(String(file.read(realImgPath)));
+		if (!b64) {
+			throw "Can't encode file content to base64";
+		}
+		
+		b64 = 'data:' + (actionUtils.mimeTypes[String(file.getExt(realImgPath))] || defaultMimeType) +
+			';base64,' + b64;
 			
-			var lastChild = _.last(this.children);
-			if (lastChild) {
-				node.previousSibling = lastChild;
-				lastChild.nextSibling = node;
+		editor.replaceContent('$0' + b64, pos, pos + imgPath.length);
+		return true;
+	}
+
+	/**
+	 * Decodes base64 string back to file.
+	 * @param {IZenEditor} editor
+	 * @param {String} data Base64-encoded file content
+	 * @param {Number} pos Caret position where image is located in the editor
+	 */
+	function decodeFromBase64(editor, data, pos) {
+		// ask user to enter path to file
+		var filePath = String(editor.prompt('Enter path to file (absolute or relative)'));
+		if (!filePath)
+			return false;
+			
+		var file = require('file');
+		var absPath = file.createPath(editor.getFilePath(), filePath);
+		if (!absPath) {
+			throw "Can't save file";
+		}
+		
+		file.save(absPath, require('base64').decode( data.replace(/^data\:.+?;.+?,/, '') ));
+		editor.replaceContent('$0' + filePath, pos, pos + data.length);
+		return true;
+	}
+});
+/**
+ * Automatically updates image size attributes in HTML's &lt;img&gt; element or
+ * CSS rule
+ * @param {Function} require
+ * @param {Underscore} _
+ * @constructor
+ * @memberOf __updateImageSizeAction
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Updates image size of &lt;img src=""&gt; tag
+	 * @param {IZenEditor} editor
+	 */
+	function updateImageSizeHTML(editor) {
+		var offset = editor.getCaretPos();
+		
+		// find tag from current caret position
+		var info = require('editorUtils').outputInfo(editor);
+		var xmlElem = require('xmlEditTree').parseFromPosition(info.content, offset, true);
+		if (xmlElem && xmlElem.name().toLowerCase() == 'img') {
+			
+			var size = getImageSizeForSource(editor, xmlElem.value('src'));
+			if (size) {
+				var compoundData = xmlElem.range(true);
+				xmlElem.value('width', size.width);
+				xmlElem.value('height', size.height, xmlElem.indexOf('width') + 1);
+				
+				return _.extend(compoundData, {
+					data: xmlElem.toString(),
+					caret: offset
+				});
+			}
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Updates image size of CSS property
+	 * @param {IZenEditor} editor
+	 */
+	function updateImageSizeCSS(editor) {
+		var offset = editor.getCaretPos();
+		
+		// find tag from current caret position
+		var info = require('editorUtils').outputInfo(editor);
+		var cssRule = require('cssEditTree').parseFromPosition(info.content, offset, true);
+		if (cssRule) {
+			// check if there is property with image under caret
+			var prop = cssRule.itemFromPosition(offset, true), m;
+			if (prop && (m = /url\((["']?)(.+?)\1\)/i.exec(prop.value() || ''))) {
+				var size = getImageSizeForSource(editor, m[2]);
+				if (size) {
+					var compoundData = cssRule.range(true);
+					cssRule.value('width', size.width + 'px');
+					cssRule.value('height', size.height + 'px', cssRule.indexOf('width') + 1);
+					
+					return _.extend(compoundData, {
+						data: cssRule.toString(),
+						caret: offset
+					});
+				}
+			}
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Returns image dimensions for source
+	 * @param {IZenEditor} editor
+	 * @param {String} src Image source (path or data:url)
+	 */
+	function getImageSizeForSource(editor, src) {
+		var fileContent;
+		if (src) {
+			// check if it is data:url
+			if (/^data:/.test(src)) {
+				fileContent = require('base64').decode( src.replace(/^data\:.+?;.+?,/, '') );
+			} else {
+				var file = require('file');
+				var absPath = file.locateFile(editor.getFilePath(), src);
+				if (absPath === null) {
+					throw "Can't find " + src + ' file';
+				}
+				
+				fileContent = String(file.read(absPath));
 			}
 			
-			this.children.push(node);
+			return require('actionUtils').getImageSize(fileContent);
+		}
+	}
+	
+	require('actions').add('update_image_size', function(editor) {
+		var result;
+		if (String(editor.getSyntax()) == 'css') {
+			result = updateImageSizeCSS(editor);
+		} else {
+			result = updateImageSizeHTML(editor);
+		}
+		
+		return require('actionUtils').compoundUpdate(editor, result);
+	});
+});/**
+ * Resolver for fast CSS typing. Handles abbreviations with the following 
+ * notation:<br>
+ * 
+ * <code>(-vendor prefix)?property(value)*(!)?</code>
+ * 
+ * <br><br>
+ * <b>Abbreviation handling</b><br>
+ * 
+ * By default, Zen Coding search for snippet definition for provided abbreviation.
+ * If snippet wasn't found, Zen Coding automatically generates tag with 
+ * abbreviation's name. For example, <code>foo</code> abbreviation will generate
+ * <code>&lt;foo&gt;&lt;/foo&gt;</code> output.
+ * <br><br>
+ * This module will capture all expanded properties and upgrade them with values, 
+ * vendor prefixes and !important declarations. All unmatched abbreviations will 
+ * be automatically transformed into <code>property-name: ${0}</code> snippets. 
+ * 
+ * <b>Vendor prefixes<b><br>
+ * 
+ * If CSS-property is preceded with dash, resolver should output property with
+ * all <i>known</i> vendor prefixes. For example, if <code>brad</code> 
+ * abbreviation generates <code>border-radius: ${value};</code> snippet,
+ * the <code>-brad</code> abbreviation should generate:
+ * <pre><code>
+ * -webkit-border-radius: ${value};
+ * -moz-border-radius: ${value};
+ * border-radius: ${value};
+ * </code></pre>
+ * Note that <i>o</i> and <i>ms</i> prefixes are omitted since Opera and IE 
+ * supports unprefixed property.<br><br>
+ * 
+ * Users can also provide an explicit list of one-character prefixes for any
+ * CSS property. For example, <code>-wm-float</code> will produce
+ * 
+ * <pre><code>
+ * -webkit-float: ${0};
+ * -moz-float: ${0};
+ * float: ${0};
+ * </code></pre>
+ * 
+ * Although this example looks pointless, users can use this feature to write
+ * cutting-edge properties implemented by browser vendors recently.  
+ * 
+ * @constructor
+ * @memberOf __cssResolverDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('cssResolver', function(require, _) {
+	var prefixObj = {
+		/** Real vendor prefix name */
+		prefix: 'zen',
+		
+		/** 
+		 * Indicates this prefix is obsolete and should't be used when user 
+		 * wants to generate all-prefixed properties
+		 */
+		obsolete: false,
+		
+		/**
+		 * Returns prefixed CSS property name
+		 * @param {String} name Unprefixed CSS property
+		 */
+		transformName: function(name) {
+			return '-' + this.prefix + '-' + name;
 		},
 		
 		/**
-		 * Returns attribute object
-		 * @private
-		 * @param {String} name Attribute name
+		 * @type {Array} List of unprefixed CSS properties that supported by 
+		 * current prefix. This list is used to generate all-prefixed property 
 		 */
-		_getAttr: function(name) {
-			name = name.toLowerCase();
-			return _.find(this.attributes, function(a) {
-				return a.name.toLowerCase() == name;
+		supports: null
+	};
+	
+	
+	/** 
+	 * List of registered one-character prefixes. Key is a one-character prefix, 
+	 * value is an <code>prefixObj</code> object
+	 */
+	var vendorPrefixes = {};
+	
+	var unitAliases = {
+		'p': '%',
+		'e': 'em',
+		'x': 'ex'
+	};
+	
+	var defaultValue = '${0};';
+	
+	// XXX module preferences
+	var prefs = require('preferences');
+	prefs.set('css.valueSeparator', ': ',
+			'Defines a symbol that should be placed between CSS property and ' 
+			+ 'value when expanding CSS abbreviations.');
+	
+	var descTemplate = _.template('A comma-separated list of CSS properties that may have ' 
+		+ '<code><%= vendor %></code> vendor prefix. This list is used to generate '
+		+ 'a list of prefixed properties when expanding <code>-property</code> '
+		+ 'abbreviations. Empty list means that all possible CSS values may ' 
+		+ 'have <code><%= vendor %></code> prefix.');
+	
+	prefs.set('css.webkitProperties', '', descTemplate({vendor: 'webkit'}));
+	prefs.set('css.mozProperties', '', descTemplate({vendor: 'moz'}));
+	prefs.set('css.msProperties', '', descTemplate({vendor: 'ms'}));
+	prefs.set('css.oProperties', '', descTemplate({vendor: 'o'}));
+	
+	function isNumeric(ch) {
+		var code = ch && ch.charCodeAt(0);
+		return (ch && ch == '.' || (code > 47 && code < 58));
+	}
+	
+	/**
+	 * Check if provided snippet contains only one CSS property and value.
+	 * @param {String} snippet
+	 * @returns {Boolean}
+	 */
+	function isSingleProperty(snippet) {
+		var utils = require('utils');
+		snippet = utils.trim(snippet);
+		
+		// check if it doesn't contain a comment
+		if (~snippet.indexOf('/*'))
+			return false;
+		
+		snippet = require('tabStops').processText(snippet, {
+			replaceCarets: true,
+			tabstop: function() {
+				return 'value';
+			}
+		});
+		
+		return snippet.split(':').length == 2;
+	}
+	
+	/**
+	 * Split snippet into a CSS property-value pair
+	 * @param {String} snippet
+	 */
+	function splitSnippet(snippet) {
+		var utils = require('utils');
+		snippet = utils.trim(snippet);
+		if (snippet.indexOf(':') == -1) {
+			return {
+				name: snippet,
+				value: defaultValue
+			};
+		}
+		
+		var pair = snippet.split(':', 2);
+		return {
+			name: utils.trim(pair[0]),
+			value: utils.trim(pair[1])
+		};
+	}
+	
+	/**
+	 * Search for a list of supported prefixes for CSS property. This list
+	 * is used to generate all-prefixed snippet
+	 * @param {String} property CSS property name
+	 * @returns {Array}
+	 */
+	function findPrefixes(property) {
+		var result = [];
+		_.each(vendorPrefixes, function(obj, prefix) {
+			if (obj.supports && _.include(obj.supports, property)) {
+				result.push(prefix);
+			}
+		});
+		
+		if (!result.length) {
+			// add all non-obsolete prefixes
+			_.each(vendorPrefixes, function(obj, prefix) {
+				if (!obj.obsolete)
+					result.push(prefix);
 			});
-		},
+		}
 		
+		return result;
+	}
+	
+	function addPrefix(name, obj) {
+		if (_.isString(obj))
+			obj = {prefix: obj};
+		
+		vendorPrefixes[name] = _.extend({}, prefixObj, obj);
+	}
+	
+	/**
+	 * Transforms snippet value if required. For example, this transformation
+	 * may add <i>!important</i> declaration to CSS property
+	 * @param {String} snippet
+	 * @param {Boolean} isImportant
+	 * @returns {String}
+	 */
+	function transformSnippet(snippet, isImportant) {
+		if (!_.isString(snippet))
+			snippet = snippet.data;
+		
+		if (!isSingleProperty(snippet))
+			return snippet;
+		
+		if (isImportant) {
+			if (~snippet.indexOf(';')) {
+				snippet = snippet.split(';').join(' !important;');
+			} else {
+				snippet += ' !important';
+			}
+		}
+		
+		// format value separator
+		var ix = snippet.indexOf(':');
+		snippet = snippet.substring(0, ix).replace(/\s+$/, '') 
+			+ prefs.get('css.valueSeparator')
+			+ require('utils').trim(snippet.substring(ix + 1));
+		
+		return snippet;
+	}
+	
+	/**
+	 * Helper function that parses comma-separated list of elements into array
+	 * @param {String} list
+	 * @returns {Array}
+	 */
+	function parseList(list) {
+		var result = _.map((list || '').split(','), require('utils').trim);
+		return result.length ? result : null;
+	}
+	
+	addPrefix('w', {
+		prefix: 'webkit',
+		supports: prefs.getArray('css.webkitProperties')
+	});
+	addPrefix('m', {
+		prefix: 'moz',
+		supports: prefs.getArray('css.mozProperties')
+	});
+	addPrefix('s', {
+		prefix: 'ms',
+		supports: prefs.getArray('css.msProperties')
+	});
+	addPrefix('o', {
+		prefix: 'o',
+		supports: prefs.getArray('css.oProperties')
+	});
+	
+	// I think nobody uses it
+//	addPrefix('k', {
+//		prefix: 'khtml',
+//		obsolete: true
+//	});
+	
+	/**
+	 * XXX register resolver
+	 * @param {TreeNode} node
+	 * @param {String} syntax
+	 */
+	require('resources').addResolver(function(node, syntax) {
+		if (syntax == 'css' && node.isElement()) {
+			return require('cssResolver').expandToSnippet(node.name);
+		}
+		
+		return null;
+	});
+	
+	return {
 		/**
-		 * Get attribute's value.
-		 * @param {String} name
-		 * @return {String|null} Returns <code>null</code> if attribute wasn't found
+		 * Adds vendor prefix
+		 * @param {String} name One-character prefix name
+		 * @param {Object} obj Object describing vendor prefix
+		 * @memberOf cssResolver
 		 */
-		getAttribute: function(name) {
-			var attr = this._getAttr(name);
-			return attr && attr.value;
+		addPrefix: addPrefix,
+		
+		/**
+		 * Returns object describing vendor prefix
+		 * @param {String} name
+		 * @returns {Object}
+		 */
+		getPrefix: function(name) {
+			return vendorPrefixes[name];
 		},
 		
 		/**
-		 * Set attribute's value.
+		 * Removes prefix object
 		 * @param {String} name
+		 */
+		removePrefix: function(name) {
+			if (name in vendorPrefixes)
+				delete vendorPrefixes[name];
+		},
+		
+		/**
+		 * Adds CSS unit shorthand and its full value
+		 * @param {String} alias
 		 * @param {String} value
 		 */
-		setAttribute: function(name, value) {
-			var attr = this._getAttr(name);
-			if (attr)
-				attr.value = value;
+		addUnitAlias: function(alias, value) {
+			unitAliases[alias] = value;
 		},
 		
 		/**
-		 * Test if current tag is unary (no closing tag)
-		 * @return {Boolean}
+		 * Get unit name for alias
+		 * @param {String} alias
+		 * @returns {String}
 		 */
-		isUnary: function() {
-			if (this.type == 'snippet')
-				return false;
+		getUnitAlias: function(alias) {
+			return unitAliases[alias];
+		},
+		
+		/**
+		 * Removes unit alias
+		 * @param {String} alias
+		 */
+		removeUnitAlias: function(alias) {
+			if (alias in unitAliases)
+				delete unitAliases[alias];
+		},
+		
+		/**
+		 * Extract vendor prefixes from abbreviation
+		 * @param {String} abbr
+		 * @returns {Object} Object containing array of prefixes and clean 
+		 * abbreviation name
+		 */
+		extractPrefixes: function(abbr) {
+			if (abbr.charAt(0) != '-') {
+				return {
+					property: abbr,
+					prefixes: null
+				};
+			}
+			
+			// abbreviation may either contain sequence of one-character prefixes
+			// or just dash, meaning that user wants to produce all possible
+			// prefixed properties
+			var i = 1, il = abbr.length, ch;
+			var prefixes = [];
+			
+			while (i < il) {
+				ch = abbr.charAt(i);
+				if (ch == '-') {
+					// end-sequence character found, stop searching
+					i++;
+					break;
+				}
 				
-			return (this.source._abbr && this.source._abbr.is_empty) 
-				|| zen_coding.require('resources').isItemInCollection(this.source.syntax, 'empty', this.name);
+				if (ch in vendorPrefixes) {
+					prefixes.push(ch);
+				} else {
+					// no prefix found, meaning user want to produce all
+					// vendor-prefixed properties
+					prefixes.length = 0;
+					i = 1;
+					break;
+				}
+				
+				i++;
+			}
+			
+			// reached end of abbreviation and no property name left
+			if (i == il -1) {
+				i = 1;
+				prefixes.length = 1;
+			}
+			
+			return {
+				property: abbr.substring(i),
+				prefixes: prefixes.length ? prefixes : 'all'
+			};
 		},
 		
 		/**
-		 * Test if current tag is inline-level (like &lt;strong&gt;, &lt;img&gt;)
-		 * @return {Boolean}
+		 * Search for value substring in abbreviation
+		 * @param {String} abbr
+		 * @returns {String} Value substring
 		 */
-		isInline: function() {
-			return this.type == 'text' || !this.source.name
-				|| zen_coding.require('resources').isItemInCollection(this.source.syntax, 'inline_level', this.name);
+		findValuesInAbbreviation: function(abbr) {
+			var i = 0, il = abbr.length, ch;
+			
+			while (i < il) {
+				ch = abbr.charAt(i);
+				if (isNumeric(ch) || (ch == '-' && isNumeric(abbr.charAt(i + 1)))) {
+					return abbr.substring(i);
+				}
+				
+				i++;
+			}
+			
+			return '';
 		},
 		
 		/**
-		 * Test if current element is block-level
-		 * @return {Boolean}
+		 * Parses values defined in abbreviations
+		 * @param {String} abbrValues Values part of abbreviations (can be 
+		 * extracted with <code>findValuesInAbbreviation</code>)
+		 * @returns {Array}
 		 */
-		isBlock: function() {
-			return this.type == 'snippet' || !this.isInline();
+		parseValues: function(abbrValues) {
+			var valueStack = '';
+			var values = [];
+			var i = 0, il = abbrValues.length, ch, nextCh;
+			
+			while (i < il) {
+				ch = abbrValues.charAt(i);
+				if (ch == '-' && valueStack) {
+					// next value found
+					values.push(valueStack);
+					valueStack = '';
+					i++;
+					continue;
+				}
+				
+				valueStack += ch;
+				i++;
+				
+				nextCh = abbrValues.charAt(i);
+				if (ch != '-' && !isNumeric(ch) && (isNumeric(nextCh) || nextCh == '-')) {
+					values.push(valueStack);
+					valueStack = '';
+				}
+			}
+			
+			if (valueStack) {
+				values.push(valueStack);
+			}
+			
+			return values;
 		},
 		
 		/**
-		 * This function tests if current tags' content contains xHTML tags. 
-		 * This function is mostly used for output formatting
+		 * Extracts values from abbreviation
+		 * @param {String} abbr
+		 * @returns {Object} Object containing array of values and clean 
+		 * abbreviation name
 		 */
-		hasTagsInContent: function() {
-			return zen_coding.require('utils').matchesTag(this.content);
+		extractValues: function(abbr) {
+			// search for value start
+			var abbrValues = this.findValuesInAbbreviation(abbr);
+			if (!abbrValues) {
+				return {
+					property: abbr,
+					values: null
+				};
+			}
+			
+			return {
+				property: abbr.substring(0, abbr.length - abbrValues.length),
+				values: this.parseValues(abbrValues)
+			};
 		},
 		
 		/**
-		 * Check if tag has child elements
-		 * @return {Boolean}
+		 * Normalizes value, defined in abbreviation.
+		 * @param {String} value
+		 * @returns {String}
 		 */
-		hasChildren: function() {
-			return !!this.children.length;
+		normalizeValue: function(value) {
+			return value.replace(/^(\-?[0-9\.]+)([a-z]*)$/, function(str, val, unit) {
+				if (!unit)
+					return val + (~val.indexOf('.') ? 'em' : 'px');
+				
+				return val + (unit in unitAliases ? unitAliases[unit] : unit);
+			});
 		},
 		
 		/**
-		 * Test if current tag contains block-level children
-		 * @return {Boolean}
+		 * Expands abbreviation into a snippet
+		 * @param {String} abbr Abbreviation name to expand
+		 * @param {String} value Abbreviation value
+		 * @returns {Array} Array of CSS properties and values or predefined
+		 * snippet (string or element)
 		 */
-		hasBlockChildren: function() {
-			return (this.hasTagsInContent() && this.isBlock()) 
-				|| _.any(this.children, function(child) {
-					return child.isBlock();
+		expand: function(abbr, value) {
+			var resources = require('resources');
+			
+			// check if snippet should be transformed to !important
+			var isImportant;
+			if (isImportant = /^(.+)\!$/.test(abbr)) {
+				abbr = RegExp.$1;
+			}
+			
+			// check if we have abbreviated resource
+			var snippet = resources.getSnippet('css', abbr);
+			if (snippet)
+				return transformSnippet(snippet, isImportant);
+			
+			// no abbreviated resource, parse abbreviation
+			var prefixData = this.extractPrefixes(abbr);
+			var valuesData = this.extractValues(prefixData.property);
+			var abbrData = _.extend(prefixData, valuesData);
+			
+			snippet = resources.getSnippet('css', abbrData.property);
+			
+			if (!snippet) {
+				snippet = abbrData.property + ':' + defaultValue;
+			} else if (!_.isString(snippet)) {
+				snippet = snippet.data;
+			}
+			
+			if (!isSingleProperty(snippet)) {
+				return snippet;
+			}
+			
+			var snippetObj = splitSnippet(snippet);
+			
+			var result = [];
+			if (!value && abbrData.values) {
+				value = _.map(abbrData.values, this.normalizeValue).join(' ') + ';';
+			}
+			
+			snippetObj.value = value || snippetObj.value;
+			
+			if (abbrData.prefixes) {
+				var prefixes = abbrData.prefixes == 'all' 
+					? findPrefixes(snippetObj.name)
+					: abbrData.prefixes;
+					
+				_.each(prefixes, function(p) {
+					if (p in vendorPrefixes) {
+						result.push(transformSnippet(
+							vendorPrefixes[p].transformName(snippetObj.name) 
+							+ ':' + snippetObj.value,
+							isImportant));
+						
+					}
 				});
+			}
+			
+			// put the original property
+			result.push(transformSnippet(snippetObj.name + ':' + snippetObj.value, isImportant));
+			
+			return result;
 		},
 		
 		/**
-		 * Search for deepest and latest child of current element
-		 * @return {ZenNode} Returns <code>null</code> if there's no children
+		 * Same as <code>expand</code> method but transforms output into a 
+		 * Zen Coding snippet
+		 * @param {String} abbr
+		 * @param {String} value
+		 * @returns {String}
 		 */
-		findDeepestChild: function() {
-			if (!this.children.length)
-				return null;
+		expandToSnippet: function(abbr, value) {
+			var snippet = this.expand(abbr, value);
+			if (_.isArray(snippet)) {
+				return snippet.join('\n');
+			}
+			
+			if (!_.isString(snippet))
+				return snippet.data;
+			
+			return String(snippet);
+		}
+	};
+});
+
+/**
+ * 'Expand Abbreviation' handler that parses gradient definition from under 
+ * cursor and updates CSS rule with vendor-prefixed values.
+ * 
+ * @memberOf __cssGradientHandlerDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('cssGradient', function(require, _) {
+	var defaultLinearDirections = ['top', 'to bottom', '0deg'];
+	
+	var reDeg = /\d+deg/i;
+	var reKeyword = /top|bottom|left|right/i;
+	
+	// XXX define preferences
+	/** @type preferences */
+	var prefs = require('preferences');
+	prefs.set('css.gradient.prefixes', 'webkit, moz, ms, o',
+			'A comma-separated list of vendor-prefixes for which values should ' 
+			+ 'be generated.');
+	
+	prefs.set('css.gradient.oldWebkit', true,
+			'Generate gradient definition for old Webkit implementations');
+	
+	prefs.set('css.gradient.omitDefaultDirection', true,
+		'Do not output default direction definition in generated gradients.');
+	
+	function normalizeSpace(str) {
+		return require('utils').trim(str).replace(/\s+/g, ' ');
+	}
+	
+	/**
+	 * Parses linear gradient definition
+	 * @param {String}
+	 */
+	function parseLinearGradient(gradient) {
+		var direction = defaultLinearDirections[0];
+		
+		// extract tokens
+		/** @type StringStream */
+		var stream = require('stringStream').create(require('utils').trim(gradient));
+		var colorStops = [], ch;
+		while (ch = stream.next()) {
+			if (stream.peek() == ',') {
+				colorStops.push(stream.current());
+				stream.next();
+				stream.eatSpace();
+				stream.start = stream.pos;
+			} else if (ch == '(') { // color definition, like 'rgb(0,0,0)'
+				stream.skipTo(')');
+			}
+		}
+		
+		// add last token
+		colorStops.push(stream.current());
+		colorStops = _.compact(_.map(colorStops, normalizeSpace));
+		
+		if (!colorStops.length)
+			return null;
+		
+		// let's see if the first color stop is actually a direction
+		if (reDeg.test(colorStops[0]) || reKeyword.test(colorStops[0])) {
+			direction = colorStops.shift();
+		}
+		
+		return {
+			type: 'linear',
+			direction: direction,
+			colorStops: _.map(colorStops, parseColorStop)
+		};
+	}
+	
+	/**
+	 * Parses color stop definition
+	 * @param {String} colorStop
+	 * @returns {Object}
+	 */
+	function parseColorStop(colorStop) {
+		colorStop = normalizeSpace(colorStop);
+		
+		// find color declaration
+		// first, try complex color declaration, like rgb(0,0,0)
+		var color = null;
+		colorStop = colorStop.replace(/^(\w+\(.+?\))\s*/, function(str, c) {
+			color = c;
+			return '';
+		});
+		
+		if (!color) {
+			// try simple declaration, like yellow, #fco, #ffffff, etc.
+			var parts = colorStop.split(' ');
+			color = parts[0];
+			colorStop = parts[1] || '';
+		}
+		
+		var result = {
+			color: color
+		};
+		
+		if (colorStop) {
+			// there's position in color stop definition
+			colorStop.replace(/^(\-?[\d\.]+)([a-z%]+)?$/, function(str, pos, unit) {
+				result.position = pos;
+				if (~pos.indexOf('.')) {
+					unit = '';
+				} else if (!unit) {
+					unit = '%';
+				}
 				
-			var deepestChild = this;
-			while (deepestChild.children.length) {
-				deepestChild = _.last(deepestChild.children);
+				if (unit)
+					result.unit = unit;
+			});
+		}
+		
+		return result;
+	}
+	
+	/**
+	 * Fills-out implied positions in color-stops. This function is useful for
+	 * old Webkit gradient definitions
+	 */
+	function fillImpliedPositions(colorStops) {
+		var from = 0;
+		
+		_.each(colorStops, function(cs, i) {
+			// make sure that first and last positions are defined
+			if (!i)
+				return cs.position = cs.position || 0;
+			
+			if (i == colorStops.length - 1 && !('position' in cs))
+				cs.position = 1;
+			
+			if ('position' in cs) {
+				var start = colorStops[from].position || 0;
+				var step = (cs.position - start) / (i - from);
+				_.each(colorStops.slice(from, i), function(cs2, j) {
+					cs2.position = start + step * j;
+				});
+				
+				from = i;
+			}
+		});
+	}
+	
+	/**
+	 * Returns textual version of direction expressed in degrees
+	 * @param {String} direction
+	 * @returns {String}
+	 */
+	function textualDirection(direction) {
+		var angle = parseFloat(direction);
+		
+		if(!_.isNaN(angle)) {
+			switch(angle % 360) {
+				case 0:   return 'left';
+				case 90:  return 'bottom';
+				case 180: return 'right';
+				case 240: return 'top';
+			}
+		}
+		
+		return direction;
+	}
+	
+	/**
+	 * Creates direction definition for old Webkit gradients
+	 * @param {String} direction
+	 * @returns {String}
+	 */
+	function oldWebkitDirection(direction) {
+		direction = textualDirection(direction);
+		
+		if(reDeg.test(direction))
+			throw "The direction is an angle that can’t be converted.";
+		
+		var v = function(pos) {
+			return ~direction.indexOf(pos) ? '100%' : '0';
+		};
+		
+		return v('right') + ' ' + v('bottom') + ', ' + v('left') + ' ' + v('top');
+	}
+	
+	/**
+	 * Pastes gradient definition into CSS rule with correct vendor-prefixes
+	 * @param {EditElement} property Matched CSS property
+	 * @param {Object} gradient Parsed gradient
+	 */
+	function pasteGradient(property, gradient) {
+		var rule = property.parent;
+		
+		// first, remove all properties within CSS rule with the same name and
+		// gradient definition
+		_.each(rule.getAll(property.name()), function(item) {
+			if (item != property && /gradient/i.test(item.value())) {
+				rule.remove(item);
+			}
+		});
+		
+		// put vanilla-clean gradient definition into current rule
+		var cssGradient = require('cssGradient');
+		property.value(cssGradient.toString(gradient));
+		
+		// put vendor-prefixed definitions before current rule
+		_.each(prefs.getArray('css.gradient.prefixes'), function(prefix) {
+			if (prefix == 'webkit' && prefs.get('css.gradient.oldWebkit')) {
+				try {
+					rule.add(property.name(), cssGradient.oldWebkitLinearGradient(gradient), rule.indexOf(property));
+				} catch(e) {}
 			}
 			
-			return deepestChild;
-		},
-		
-		/**
-		 * Returns string output for current node
-		 * @return {String}
-		 */
-		toString: function() {
-			var innerContent = _.map(this.children, function(child) {
-				return child.toString();
-			}).join('');
-			
-			return this.start + this.content + innerContent + this.end;
-		},
-		
-		/**
-		 * Test if current element contains output placeholder (aka $#)
-		 * @return {Boolean}
-		 */
-		hasOutputPlaceholder: function() {
-			if (hasOutputPlaceholder(this.content)) {
-				return true;
-			} else {
-				// search inside attributes
-				for (var i = 0, il = this.attributes.length; i < il; i++) {
-					if (hasOutputPlaceholder(this.attributes[i].value))
-						return true;
-				}
-			}
-			
+			rule.add(property.name(), cssGradient.toString(gradient, prefix), rule.indexOf(property));
+		});
+	}
+	
+	// XXX register expand handler
+	/**
+	 * @param {IZenEditor} editor
+	 * @param {String} syntax
+	 * @param {String} profile
+	 */
+	require('expandAbbreviation').addHandler(function(editor, syntax, profile) {
+		var info = require('editorUtils').outputInfo(editor, syntax, profile);
+		if (info.syntax != 'css')
 			return false;
-		},
 		
-		/**
-		 * Recursively search for elements with output placeholders (aka $#)
-		 * inside current element (not included in result)
-		 * @param {Array} receiver
-		 * @return {Array} Array of elements with output placeholders.  
-		 */
-		findElementsWithOutputPlaceholder: function(receiver) {
-			receiver = receiver || [];
-			_.each(this.children, function(child) {
-				if (child.hasOutputPlaceholder()) {
-					receiver.push(child);
+		// let's see if we are expanding gradient definition
+		var caret = editor.getCaretPos(), gradient;
+		/** @type EditContainer */
+		var cssRule = require('cssEditTree').parseFromPosition(info.content, caret, true);
+		if (cssRule) {
+			var cssProp = cssRule.itemFromPosition(caret, true);
+			if (!cssProp) {
+				// in case user just started writing CSS property
+				// and didn't include semicolon–try another approach
+				cssProp = _.find(cssRule.list(), function(elem) {
+					return elem.range(true).end == caret;
+				});
+			}
+			
+			if (cssProp) {
+				// make sure that caret is right after gradient definition
+				var r = _.find(cssProp.valueParts(true), function(range) {
+					return range.end == caret;
+				});
+				
+				if (r && (gradient = require('cssGradient').parse(r.substring(info.content)))) {
+					// make sure current property has terminating semicolon
+					cssProp.end(';');
+					
+					var ruleStart = cssRule.options.offset || 0;
+					var ruleEnd = ruleStart + cssRule.toString().length;
+					
+					pasteGradient(cssProp, gradient);
+					editor.replaceContent(cssRule.toString(), ruleStart, ruleEnd);
+					editor.setCaretPos(cssProp.valueRange(true).end);
+					return true;
 				}
-				child.findElementsWithOutputPlaceholder(receiver);
+			}
+		}
+		
+		return false;
+	});
+	
+	// XXX register "Reflect CSS Value" action delegate
+	/**
+	 * @param {EditElement} property
+	 */
+	require('reflectCSSValue').addHandler(function(property) {
+		var cssGradient = require('cssGradient');
+		var gradient = cssGradient.parse(property.value());
+		if (!gradient)
+			return false;
+		
+		// reflect value for properties with the same name
+		_.each(property.parent.getAll(property.name()), function(prop) {
+			if (prop === property)
+				return;
+			
+			// check if property value starts with gradient definition
+			var m = prop.value().match(/^\s*(\-([a-z]+)\-)?linear\-gradient/);
+			if (m) {
+				prop.value(cssGradient.toString(gradient, m[2] || ''));
+			} else if (m = prop.value().match(/\s*\-webkit\-gradient/)) {
+				// old webkit gradient definition
+				prop.value(cssGradient.oldWebkitLinearGradient(gradient));
+			}
+		});
+		
+		return true;
+	});
+	
+	return {
+		/**
+		 * Parses gradient definition
+		 * @param {String} gradient
+		 * @returns {Object}
+		 */
+		parse: function(gradient) {
+			var result = null;
+			gradient = require('utils').trim(gradient).replace(/^([\w\-]+)\((.+?)\)$/, function(str, type, definition) {
+				// remove vendor prefix
+				type = type.toLowerCase().replace(/^\-[a-z]+\-/, '');
+				if (type == 'linear-gradient' || type == 'lg') {
+					result = parseLinearGradient(definition);
+					return '';
+				}
+				
+				return str;
 			});
 			
-			return receiver;
+			return result;
 		},
 		
 		/**
-		 * Paste content in context of current node. Pasting is a special case
-		 * of recursive adding content in node. 
-		 * This function will try to find $# placeholder inside node's 
-		 * attributes and text content and replace in with <code>text</code>.
-		 * If it doesn't find $# placeholder, it will put <code>text</code>
-		 * value as the deepest child content
-		 * @param {String} text Text to paste
+		 * Produces linear gradient definition used in early Webkit 
+		 * implementations
+		 * @param {Object} gradient Parsed gradient
+		 * @returns {String}
 		 */
-		pasteContent: function(text) {
-			var symbol = '$#';
-			var r = [symbol, text];
-			var replaceFn = function() {return r;};
-			var utils = zen_coding.require('utils');
-			/** @type {ZenNode[]} */
-			var items = [];
-				
-			if (this.hasOutputPlaceholder())
-				items.push(this);
-				
-			items = items.concat(this.findElementsWithOutputPlaceholder());
+		oldWebkitLinearGradient: function(gradient) {
+			if (_.isString(gradient))
+				gradient = this.parse(gradient);
 			
-			if (items.length) {
-				_.each(items, function(item){
-					item.content = utils.replaceUnescapedSymbol(item.content, symbol, replaceFn);
-					_.each(item.attributes, function(a) {
-						a.value = utils.replaceUnescapedSymbol(a.value, symbol, replaceFn);
-					});
+			if (!gradient)
+				return null;
+			
+			var colorStops = _.map(gradient.colorStops, _.clone);
+			
+			// normalize color-stops position
+			_.each(colorStops, function(cs) {
+				if (!('position' in cs)) // implied position
+					return;
+				
+				if (~cs.position.indexOf('.') || cs.unit == '%') {
+					cs.position = parseFloat(cs.position) / (cs.unit == '%' ? 100 : 1);
+				} else {
+					throw "Can't convert color stop '" + (cs.position + (cs.unit || '')) + "'";
+				}
+			});
+			
+			fillImpliedPositions(colorStops);
+			
+			// transform color-stops into string representation
+			colorStops = _.map(colorStops, function(cs, i) {
+				if (!cs.position && !i)
+					return 'from(' + cs.color + ')';
+				
+				if (cs.position == 1 && i == colorStops.length - 1)
+					return 'to(' + cs.color + ')';
+				
+				return 'color-stop(' + (cs.position.toFixed(2).replace(/\.?0+$/, '')) + ', ' + cs.color + ')';
+			});
+			
+			return '-webkit-gradient(linear, ' 
+				+ oldWebkitDirection(gradient.direction)
+				+ ', '
+				+ colorStops.join(', ')
+				+ ')';
+		},
+		
+		/**
+		 * Returns string representation of parsed gradient
+		 * @param {Object} gradient Parsed gradient
+		 * @param {String} prefix Vendor prefix
+		 * @returns {String}
+		 */
+		toString: function(gradient, prefix) {
+			if (gradient.type == 'linear') {
+				var fn = (prefix ? '-' + prefix + '-' : '') + 'linear-gradient';
+				
+				// transform color-stops
+				var colorStops = _.map(gradient.colorStops, function(cs) {
+					return cs.color + ('position' in cs 
+							? ' ' + cs.position + (cs.unit || '')
+							: '');
 				});
-			} else {
-				// no placeholders found, add content to the deepest child
-				var child = this.findDeepestChild() || this;
-				child.content += text;
+				
+				if (gradient.direction 
+						&& (!prefs.get('css.gradient.omitDefaultDirection') 
+						|| !_.include(defaultLinearDirections, gradient.direction))) {
+					colorStops.unshift(gradient.direction);
+				}
+				
+				return fn + '(' + colorStops.join(', ') + ')';
 			}
 		}
 	};
-	
-	var elems = zen_coding.require('elements');
-	elems.add('ZenNode', function(elem) {
-		return new ZenNode(elem);
-	});
-})();/**
- * Expando (elements like 'ul+') resolver
+});/**
+ * Expando (elements like 'dl+') resolver
  * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- * @param {TreeNode} node
- * @param {String} syntax
+ * @param {Function} require
+ * @param {Underscore} _
  */
-zen_coding.require('resources').addResolver(function(node, syntax) {
-	if (!node.isEmpty() && !node.isTextNode() && node.name.indexOf('+') != -1) {
-		// it's expando
-		var a = this.getAbbreviation(syntax, node.name);
-		if (a) {
-			return zen_coding.require('transform').createParsedTree(a.data, syntax);
+zen_coding.exec(function(require, _) {
+	var res = require('resources');
+	/**
+	 * @param {TreeNode} node
+	 * @param {String} syntax
+	 */
+	res.addResolver(function(node, syntax) {
+		if (node.isElement() && ~node.name.indexOf('+')) {
+			// it's expando
+			var a = res.getAbbreviation(syntax, node.name);
+			if (a) {
+				return require('transform').createParsedTree(a.data, syntax);
+			}
 		}
-	}
-	
-	return null;
+		
+		return null;
+	});
 });/**
  * Module adds support for generators: a regexp-based abbreviation resolver 
  * that can produce custom output.
+ * @param {Function} require
+ * @param {Underscore} _
  */
-(function() {
-	var generators = [];
-	var resources = zen_coding.require('resources');
+zen_coding.exec(function(require, _) {
+	/** @type HandlerList */
+	var generators = require('handlerList').create();
+	var resources = require('resources');
 	
 	_.extend(resources, {
-		addGenerator: function(regexp, fn) {
+		/**
+		 * Add generator. A generator function <code>fn</code> will be called 
+		 * only if current abbreviation matches <code>regexp</code> regular 
+		 * expression and this function should return <code>null</code> if
+		 * abbreviation cannot be resolved
+		 * @param {RegExp} regexp Regular expression for abbreviation element name
+		 * @param {Function} fn Resolver function
+		 * @param {Object} options Options list as described in 
+		 * {@link HandlerList#add()} method
+		 */
+		addGenerator: function(regexp, fn, options) {
 			if (_.isString(regexp))
 				regexp = new RegExp(regexp);
 			
-			generators.unshift({
-				re: regexp,
-				fn: fn
-			});
+			generators.add(function(node, syntax) {
+				var m;
+				if ((m = regexp.exec(node.name))) {
+					return fn(m, node, syntax);
+				}
+				
+				return null;
+			}, options);
 		}
 	});
 	
 	resources.addResolver(function(node, syntax) {
-		var result = null;
-		var elements = zen_coding.require('elements');
-		for (var i = 0, il = generators.length; i < il; i++) {
-			var item = generators[i], m;
-			if ((m = item.re.exec(node.name))) {
-				result = item.fn(m, node, syntax);
-				if (result !== null) {
-					return result;
-				}
-			}
-		}
-		
-		return result;
+		return generators.exec(null, _.toArray(arguments));
 	});
-}());/**
- * @memberOf __zen_filter_bem
- * @constructor
+});/**
+ * Module for resolving tag names: returns best matched tag name for child
+ * element based on passed parent's tag name. Also provides utility function
+ * for element type detection (inline, block-level, empty)
+ * @param {Function} require
+ * @param {Underscore} _
  */
-zen_coding.require('filters').add('bem', (function() {
-	var separators = {
-		element: '__',
-		modifier: '_'
+zen_coding.define('tagName', function(require, _) {
+	var elementTypes = {
+		empty: 'area,base,basefont,br,col,frame,hr,img,input,isindex,link,meta,param,embed,keygen,command'.split(','),
+		blockLevel: 'address,applet,blockquote,button,center,dd,del,dir,div,dl,dt,fieldset,form,frameset,hr,iframe,ins,isindex,li,link,map,menu,noframes,noscript,object,ol,p,pre,script,table,tbody,td,tfoot,th,thead,tr,ul,h1,h2,h3,h4,h5,h6'.split(','),
+		inlineLevel: 'a,abbr,acronym,applet,b,basefont,bdo,big,br,button,cite,code,del,dfn,em,font,i,iframe,img,input,ins,kbd,label,map,object,q,s,samp,select,small,span,strike,strong,sub,sup,textarea,tt,u,var'.split(',')
 	};
 	
+	var elementMap = {
+		'ul': 'li',
+		'ol': 'li',
+		'table': 'tr',
+		'tr': 'td',
+		'tbody': 'tr',
+		'thead': 'tr',
+		'tfoot': 'tr',
+		'colgroup': 'col',
+		'select': 'option',
+		'optgroup': 'option',
+		'audio': 'source',
+		'video': 'source',
+		'object': 'param',
+		'map': 'area'
+	};
+	
+	return {
+		/**
+		 * Returns best matched child element name for passed parent's
+		 * tag name
+		 * @param {String} name
+		 * @returns {String}
+		 * @memberOf tagName
+		 */
+		resolve: function(name) {
+			name = (name || '').toLowerCase();
+			
+			if (name in elementMap)
+				return this.getMapping(name);
+			
+			if (this.isInlineLevel(name))
+				return 'span';
+			
+			return 'div';
+		},
+		
+		/**
+		 * Returns mapped child element name for passed parent's name 
+		 * @param {String} name
+		 * @returns {String}
+		 */
+		getMapping: function(name) {
+			return elementMap[name.toLowerCase()];
+		},
+		
+		/**
+		 * Check if passed element name belongs to inline-level element
+		 * @param {String} name
+		 * @returns {Boolean}
+		 */
+		isInlineLevel: function(name) {
+			return this.isTypeOf(name, 'inlineLevel');
+		},
+		
+		/**
+		 * Check if passed element belongs to block-level element.
+		 * For better matching of unknown elements (for XML, for example), 
+		 * you should use <code>!this.isInlineLevel(name)</code>
+		 * @returns {Boolean}
+		 */
+		isBlockLevel: function(name) {
+			return this.isTypeOf(name, 'blockLevel');
+		},
+		
+		/**
+		 * Check if passed element is void (i.e. should not have closing tag).
+		 * @returns {Boolean}
+		 */
+		isEmptyElement: function(name) {
+			return this.isTypeOf(name, 'empty');
+		},
+		
+		/**
+		 * Generic function for testing if element name belongs to specified
+		 * elements collection
+		 * @param {String} name Element name
+		 * @param {String} type Collection name
+		 * @returns {Boolean}
+		 */
+		isTypeOf: function(name, type) {
+			return _.include(elementTypes[type], name);
+		},
+		
+		/**
+		 * Adds new parent–child mapping
+		 * @param {String} parent
+		 * @param {String} child
+		 */
+		addMapping: function(parent, child) {
+			elementMap[parent] = child;
+		},
+		
+		/**
+		 * Removes parent-child mapping
+		 */
+		removeMapping: function(parent) {
+			if (parent in elementMap)
+				delete elementMap[parent];
+		},
+		
+		/**
+		 * Adds new element into collection
+		 * @param {String} name Element name
+		 * @param {String} collection Collection name
+		 */
+		addElementToCollection: function(name, collection) {
+			if (!elementTypes[collection])
+				elementTypes[collection] = [];
+			
+			var col = this.getCollection(collection);
+			if (!_.include(col, name))
+				col.push(name);
+		},
+		
+		/**
+		 * Removes element name from specified collection
+		 * @param {String} name Element name
+		 * @param {String} collection Collection name
+		 * @returns
+		 */
+		removeElementFromCollection: function(name, collection) {
+			if (collection in elementTypes) {
+				elementTypes[collection] = _.without(this.getCollection(collection), name);
+			}
+		},
+		
+		/**
+		 * Returns elements name collection
+		 * @param {String} name Collection name
+		 * @returns {Array}
+		 */
+		getCollection: function(name) {
+			return elementTypes[name];
+		}
+	};
+});/**
+ * Filter for aiding of writing elements with complex class names as described
+ * in Yandex's BEM (Block, Element, Modifier) methodology. This filter will
+ * automatically inherit block and element names from parent elements and insert
+ * them into child element classes
+ * @memberOf __bemFilterDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	var prefs = require('preferences');
+	prefs.set('bem.elementSeparator', '__', 'Class name’s element separator.');
+	prefs.set('bem.modifierSeparator', '_', 'Class name’s modifier separator.');
+	prefs.set('bem.shortElementPrefix', '-', 
+			'Symbol for describing short “block-element” notation. Class names '
+			+ 'prefixed with this symbol will be treated as element name for parent‘s '
+			+ 'block name. Each symbol instance traverses one level up in parsed ' 
+			+ 'tree for block name lookup. Empty value will disable short notation.');
+	
 	var shouldRunHtmlFilter = false;
+	
+	function getSeparators() {
+		return {
+			element: prefs.get('bem.elementSeparator'),
+			modifier: prefs.get('bem.modifierSeparator')
+		};
+	}
 	
 	/**
 	 * @param {ZenNode} item
 	 */
 	function bemParse(item) {
-		if (!zen_coding.require('elements').is(item.source, 'parsedElement'))
+		if (!require('elements').is(item.source, 'parsedElement'))
 			return item;
-		
-		/** @type Underscore */
-		var _ = zen_coding.require('_');
 		
 		// save BEM stuff in cache for faster lookups
 		item.__bem = {
@@ -6663,13 +10457,9 @@ zen_coding.require('filters').add('bem', (function() {
 		if (!item.__bem.block) {
 			// guess best match for block name
 			var reBlockName = /^[a-z]\-/i;
-			for (var i = 0, il = allClassNames.length; i < il; i++) {
-				/** @type String */
-				if (reBlockName.test(allClassNames[i])) {
-					item.__bem.block = allClassNames[i];
-					break;
-				}
-			}
+			item.__bem.block = _.find(allClassNames, function(name) {
+				return reBlockName.test(name);
+			});
 			
 			// guessing doesn't worked, pick first class name as block name
 			if (!item.__bem.block) {
@@ -6678,7 +10468,6 @@ zen_coding.require('filters').add('bem', (function() {
 		}
 		
 		return item;
-	
 	}
 	
 	/**
@@ -6686,11 +10475,16 @@ zen_coding.require('filters').add('bem', (function() {
 	 * @returns {String}
 	 */
 	function normalizeClassName(className) {
-		var utils = zen_coding.require('utils');
-		className = ' ' + (className || '') + ' ';
-		className = className.replace(/\s+/g, ' ').replace(/\s(\-+)/g, function(str, p1) {
-			return ' ' + utils.repeatString(separators.element, p1.length);
-		});
+		var utils = require('utils');
+		className = (' ' + (className || '') + ' ').replace(/\s+/g, ' ');
+		
+		var shortSymbol = prefs.get('bem.shortElementPrefix');
+		if (shortSymbol) {
+			var re = new RegExp('\\s(' + utils.escapeForRegexp(shortSymbol) + '+)', 'g');
+			className = className.replace(re, function(str, p1) {
+				return ' ' + utils.repeatString(getSeparators().element, p1.length);
+			});
+		}
 		
 		return utils.trim(className);
 	}
@@ -6712,7 +10506,8 @@ zen_coding.require('filters').add('bem', (function() {
 		// * block__element_modifier
 		// * block__element_modifier1_modifier2
 		// * block_modifier
-		var result, block = '', element = '', modifier = '';
+		var block = '', element = '', modifier = '';
+		var separators = getSeparators();
 		if (~name.indexOf(separators.element)) {
 			var blockElem = name.split(separators.element);
 			var elemModifiers = blockElem[1].split(separators.modifier);
@@ -6747,7 +10542,6 @@ zen_coding.require('filters').add('bem', (function() {
 				result.push(prefix + separators.modifier + modifier);
 			}
 			
-			
 			item.__bem.block = block;
 			item.__bem.element = element;
 			item.__bem.modifier = modifier;
@@ -6769,6 +10563,7 @@ zen_coding.require('filters').add('bem', (function() {
 	 * transformed
 	 */
 	function transformClassName(name, item, entityType) {
+		var separators = getSeparators();
 		var reSep = new RegExp('^(' + separators[entityType] + ')+', 'g');
 		if (reSep.test(name)) {
 			var depth = 0; // parent lookup depth
@@ -6828,98 +10623,144 @@ zen_coding.require('filters').add('bem', (function() {
 	 * 
 	 * @param {ZenNode} tree
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
 	 */
-	function process(tree, profile, level) {
+	function process(tree, profile) {
 		if (tree.name)
 			bemParse(tree);
 		
-		var elements = zen_coding.require('elements');
-		
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			var item = tree.children[i];
+		var elements = require('elements');
+		_.each(tree.children, function(item) {
 			process(bemParse(item), profile);
 			if (elements.is(item.source, 'parsedElement') && item.start)
 				shouldRunHtmlFilter = true;
-		}
+		});
 		
 		return tree;
 	};
 	
-	/**
-	 * @param {ZenNode} tree
-	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
-	 */
-	return function(tree, profile, level) {
+	require('filters').add('bem', function(tree, profile) {
 		shouldRunHtmlFilter = false;
-		tree = process(tree, profile, level);
+		tree = process(tree, profile);
 		// in case 'bem' filter is applied after 'html' filter: run it again
 		// to update output
 		if (shouldRunHtmlFilter) {
-			tree = zen_coding.require('filters').apply(tree, 'html', profile);
+			tree = require('filters').apply(tree, 'html', profile);
 		}
 		
 		return tree;
-	};
-})());/**
+	});
+});
+
+/**
  * Comment important tags (with 'id' and 'class' attributes)
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */zen_coding.require('filters').add('c', (function() {
+ * @constructor
+ * @memberOf __commentFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	// define some preferences
+	/** @type zen_coding.preferences */
+	var prefs = require('preferences');
+	
+	prefs.set('filter.commentAfter', 
+			'\n<%= padding %><!-- /<%= attr("id", "#") %><%= attr("class", ".") %> -->',
+			'A definition of comment that should be placed <i>after</i> matched '
+			+ 'element when <code>comment</code> filter is applied. This definition '
+			+ 'is an ERB-style template passed to <code>_.template()</code> '
+			+ 'function (see Underscore.js docs for details). In template context, '
+			+ 'the following properties and functions are availabe:\n'
+			+ '<ul>'
+			
+			+ '<li><code>attr(name, before, after)</code> – a function that outputs' 
+			+ 'specified attribute value concatenated with <code>before</code> ' 
+			+ 'and <code>after</code> strings. If attribute doesn\'t exists, the ' 
+			+ 'empty string will be returned.</li>'
+			
+			+ '<li><code>node</code> – current node (instance of <code>ZenNode</code>)</li>'
+			
+			+ '<li><code>name</code> – name of current tag</li>'
+			
+			+ '<li><code>padding</code> – current string padding, can be used ' 
+			+ 'for formatting</li>'
+			
+			+'</ul>');
+	
+	prefs.set('filter.commentBefore', 
+			'',
+			'A definition of comment that should be placed <i>before</i> matched '
+			+ 'element when <code>comment</code> filter is applied. '
+			+ 'For more info, read description of <code>filter.commentAfter</code> '
+			+ 'property');
+	
+	prefs.set('filter.commentTrigger', 'id, class',
+			'A comma-separated list of attribute names that should exist on tag '
+			+ 'where comment should be added. If you wish to add comment for '
+			+ 'every element, set this option to <code>*</code>');
+	
 	/**
 	 * Add comments to tag
 	 * @param {ZenNode} node
 	 */
-	function addComments(node, i) {
-		var utils = zen_coding.require('utils');
+	function addComments(node, templateBefore, templateAfter) {
+		var utils = require('utils');
 		
-		var id_attr = node.getAttribute('id'),
-			class_attr = node.getAttribute('class'),
-			nl = utils.getNewline();
-			
-		if (id_attr || class_attr) {
-			var comment_str = '',
-				padding = (node.parent) ? node.parent.padding : '';
-			if (id_attr) comment_str += '#' + id_attr;
-			if (class_attr) comment_str += '.' + class_attr;
-			
-			node.start = node.start.replace(/</, '<!-- ' + comment_str + ' -->' + nl + padding + '<');
-			node.end = node.end.replace(/>/, '>' + nl + padding + '<!-- /' + comment_str + ' -->');
-			
-			// replace counters
-			var counter = utils.getCounterForNode(node);
-			node.start = utils.replaceCounter(node.start, counter);
-			node.end = utils.replaceCounter(node.end, counter);
+		// check if comments should be added
+		var trigger = prefs.get('filter.commentTrigger');
+		if (trigger != '*') {
+			var shouldAdd = _.find(trigger.split(','), function(name) {
+				return !!node.getAttribute(utils.trim(name));
+			});
+			if (!shouldAdd) return;
 		}
+		
+		var ctx = {
+			node: node,
+			name: node.name,
+			padding: node.parent ? node.parent.padding : '',
+			attr: function(name, before, after) {
+				if (node.getAttribute(name)) {
+					return (before || '') + node.getAttribute(name) + (after || '');
+				}
+				
+				return '';
+			}
+		};
+		
+		var nodeBefore = utils.normalizeNewline(templateBefore ? templateBefore(ctx) : '');
+		var nodeAfter = utils.normalizeNewline(templateAfter ? templateAfter(ctx) : '');
+		
+		node.start = node.start.replace(/</, nodeBefore + '<');
+		node.end = node.end.replace(/>/, '>' + nodeAfter);
 	}
 	
-	function process(tree, profile) {
-		if (profile.tag_nl === false)
-			return tree;
-		
-		var elemens = zen_coding.require('element');
-			
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
-			
+	function process(tree, before, after) {
+		var elements = require('elements');
+		_.each(tree.children, function(item) {
 			if (item.isBlock() && elements.is(item.source, 'parsedElement'))
-				addComments(item, i);
+				addComments(item, before, after);
 			
-			process(item, profile);
-		}
-		
+			process(item, before, after);
+		});
+			
 		return tree;
 	}
 	
-	return process;
-})());/**
+	require('filters').add('c', function(tree) {
+		var templateBefore = _.template(prefs.get('filter.commentBefore'));
+		var templateAfter = _.template(prefs.get('filter.commentAfter'));
+		
+		return process(tree, templateBefore, templateAfter);
+	});
+});
+/**
  * Filter for escaping unsafe XML characters: <, >, &
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
-	var char_map = {
+ */zen_coding.exec(function(require, _) {
+	var charMap = {
 		'<': '&lt;',
 		'>': '&gt;',
 		'&': '&amp;'
@@ -6927,50 +10768,20 @@ zen_coding.require('filters').add('bem', (function() {
 	
 	function escapeChars(str) {
 		return str.replace(/([<>&])/g, function(str, p1){
-			return char_map[p1];
+			return charMap[p1];
 		});
 	}
 	
-	function process(tree, profile, level) {
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
-			
+	require('filters').add('e', function process(tree) {
+		_.each(tree.children, function(item) {
 			item.start = escapeChars(item.start);
 			item.end = escapeChars(item.end);
-			
 			process(item);
-		}
+		});
 		
 		return tree;
-	}
-	
-	zen_coding.require('filters').add('e', process);
-})();/**
- * Format CSS properties: add space after property name:
- * padding:0; → padding: 0;
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
- */(function(){
-	function process(tree, profile) {
-		var elements = zen_coding.require('elements');
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
-			
-			// CSS properties are always snippets 
-			if (elements.is(item.source, 'parsedSnippet')) {
-				item.start = item.start.replace(/([\w\-]+\s*:)(?!:)\s*/, '$1 ');
-			}
-			
-			process(item, profile);
-		}
-		
-		return tree;
-	}
-	
-	zen_coding.require('filters').add('fc', process);
-})();/**
+	});
+});/**
  * Generic formatting filter: creates proper indentation for each tree node,
  * placing "%s" placeholder where the actual output should be. You can use
  * this filter to preformat tree and then replace %s placeholder to whatever you
@@ -6978,18 +10789,16 @@ zen_coding.require('filters').add('bem', (function() {
  * of abbreviation.
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * 
- * @include "../zen_coding.js"
- */(function(){
-	var child_token = '${child}',
-		placeholder = '%s';
-	
-	function getNewline() {
-		return zen_coding.require('resources').getVariable('newline');
-	}
+ * @constructor
+ * @memberOf __formatFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */zen_coding.exec(function(require, _){
+	var childToken = '${child}';
+	var placeholder = '%s';
 	
 	function getIndentation() {
-		return zen_coding.require('resources').getVariable('indentation');
+		return require('resources').getVariable('indentation');
 	}
 	
 	/**
@@ -6998,11 +10807,11 @@ zen_coding.require('filters').add('bem', (function() {
 	 * @return {Boolean}
 	 */
 	function hasBlockSibling(item) {
-		return (item.parent && item.parent.hasBlockChildren());
+		return item.parent && item.parent.hasBlockChildren();
 	}
 	
 	/**
-	 * Test if passed itrem is very first child of the whole tree
+	 * Test if passed item is very first child of the whole tree
 	 * @param {ZenNode} tree
 	 */
 	function isVeryFirstChild(item) {
@@ -7019,7 +10828,7 @@ zen_coding.require('filters').add('bem', (function() {
 		if (!profile.inline_break)
 			return false;
 			
-		// find toppest non-inline sibling
+		// find topmost non-inline sibling
 		while (node.previousSibling && node.previousSibling.isInline())
 			node = node.previousSibling;
 		
@@ -7027,15 +10836,15 @@ zen_coding.require('filters').add('bem', (function() {
 			return false;
 			
 		// calculate how many inline siblings we have
-		var node_count = 1;
+		var nodeCount = 1;
 		while (node = node.nextSibling) {
 			if (node.type == 'text' || !node.isInline())
-				node_count = 0;
+				nodeCount = 0;
 			else if (node.isInline())
-				node_count++;
+				nodeCount++;
 		}
 		
-		return node_count >= profile.inline_break;
+		return nodeCount >= profile.inline_break;
 	}
 	
 	/**
@@ -7046,17 +10855,19 @@ zen_coding.require('filters').add('bem', (function() {
 	function shouldBreakChild(node, profile) {
 		// we need to test only one child element, because 
 		// hasBlockChildren() method will do the rest
-		return (node.children.length && shouldBreakLine(node.children[0], profile));
+		return node.children.length && shouldBreakLine(node.children[0], profile);
 	}
 	
 	/**
 	 * Processes element with <code>snippet</code> type
 	 * @param {ZenNode} item
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
 	function processSnippet(item, profile, level) {
+		var utils = require('utils');
 		var data = item.source.value;
+		var nl = utils.getNewline();
 			
 		if (!data)
 			// snippet wasn't found, process it as tag
@@ -7064,27 +10875,26 @@ zen_coding.require('filters').add('bem', (function() {
 			
 		item.start = item.end = placeholder;
 		
-		var utils = zen_coding.require('utils');
-		var padding = (item.parent) 
+		var padding = item.parent 
 			? item.parent.padding
 			: utils.repeatString(getIndentation(), level);
 		
 		if (!isVeryFirstChild(item)) {
-			item.start = getNewline() + padding + item.start;
+			item.start = nl + padding + item.start;
 		}
 		
 		// adjust item formatting according to last line of <code>start</code> property
-		var parts = data.split(child_token),
-			lines = utils.splitByLines(parts[0] || ''),
-			padding_delta = getIndentation();
+		var parts = data.split(childToken);
+		var lines = utils.splitByLines(parts[0] || '');
+		var paddingDelta = getIndentation();
 			
 		if (lines.length > 1) {
 			var m = lines[lines.length - 1].match(/^(\s+)/);
 			if (m)
-				padding_delta = m[1];
+				paddingDelta = m[1];
 		}
 		
-		item.padding = padding + padding_delta;
+		item.padding = padding + paddingDelta;
 		
 		return item;
 	}
@@ -7101,34 +10911,34 @@ zen_coding.require('filters').add('bem', (function() {
 			return item;
 		
 		item.start = item.end = placeholder;
-		var utils = zen_coding.require('utils');
-		var is_unary = (item.isUnary() && !item.children.length);
+		var utils = require('utils');
+		var isUnary = (item.isUnary() && !item.children.length);
+		var nl = utils.getNewline();
 			
 		// formatting output
 		if (profile.tag_nl !== false) {
-			var padding = (item.parent) 
-					? item.parent.padding
-					: utils.repeatString(getIndentation(), level),
-				force_nl = (profile.tag_nl === true),
-				should_break = shouldBreakLine(item, profile);
+			var padding = item.parent 
+				? item.parent.padding
+				: utils.repeatString(getIndentation(), level);
+			var forceNl = profile.tag_nl === true;
+			var shouldBreak = shouldBreakLine(item, profile);
 			
 			// formatting block-level elements
 			if (item.type != 'text') {
-				if (( (item.isBlock() || should_break) && item.parent) || force_nl) {
+				if (( (item.isBlock() || shouldBreak) && item.parent) || forceNl) {
 					// snippet children should take different formatting
 					if (!item.parent || (item.parent.type != 'snippet' && !isVeryFirstChild(item)))
-						item.start = getNewline() + padding + item.start;
+						item.start = nl + padding + item.start;
 						
-					if (item.hasBlockChildren() || shouldBreakChild(item, profile) || (force_nl && !is_unary))
-						item.end = getNewline() + padding + item.end;
+					if (item.hasBlockChildren() || shouldBreakChild(item, profile) || (forceNl && !isUnary))
+						item.end = nl + padding + item.end;
 						
-					if (item.hasTagsInContent() || (force_nl && !item.hasChildren() && !is_unary))
-						item.start += getNewline() + padding + getIndentation();
-					
+					if (item.hasTagsInContent() || (forceNl && !item.hasChildren() && !isUnary))
+						item.start += nl + padding + getIndentation();
 				} else if (item.isInline() && hasBlockSibling(item) && !isVeryFirstChild(item)) {
-					item.start = getNewline() + padding + item.start;
+					item.start = nl + padding + item.start;
 				} else if (item.isInline() && item.hasBlockChildren()) {
-					item.end = getNewline() + padding + item.end;
+					item.end = nl + padding + item.end;
 				}
 				
 				item.padding = padding + getIndentation();
@@ -7142,69 +10952,49 @@ zen_coding.require('filters').add('bem', (function() {
 	 * Processes simplified tree, making it suitable for output as HTML structure
 	 * @param {ZenNode} tree
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
-	function process(tree, profile, level) {
+	require('filters').add('_format', function process(tree, profile, level) {
 		level = level || 0;
-		var utils = zen_coding.require('utils');
+		var utils = require('utils');
 		
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
+		_.each(tree.children, function(item) {
 			item = (item.type == 'tag') 
 				? processTag(item, profile, level) 
 				: processSnippet(item, profile, level);
-				
+			
 			if (item.content)
 				item.content = utils.padString(item.content, item.padding);
-				
+			
 			process(item, profile, level + 1);
-		}
+		});
 		
 		return tree;
-	}
-	
-	zen_coding.require('filters').add('_format', process);
-})();/**
- * Filter that produces HAML tree
+	});
+});/**
+ * Filter for producing HAML code from abbreviation.
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * 
- * @include "../zen_coding.js"
+ * @constructor
+ * @memberOf __hamlFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
  */
-(function(){
-	var child_token = '${child}';
+zen_coding.exec(function(require, _) {
+	var childToken = '${child}';
 	
 	/**
-	 * Returns proper string case, depending on profile value
-	 * @param {String} val String to process
-	 * @param {String} caseParam Profile's case value ('lower', 'upper', 'leave')
-	 */
-	function processStringCase(val, caseParam) {
-		switch (String(caseParam || '').toLowerCase()) {
-			case 'lower':
-				return val.toLowerCase();
-			case 'upper':
-				return val.toUpperCase();
-		}
-		
-		return val;
-	}
-	
-	/**
-	 * Creates HTML attributes string from tag according to profile settings
+	 * Creates HAML attributes string from tag according to profile settings
 	 * @param {ZenNode} tag
-	 * @param {default_profile} profile
+	 * @param {Object} profile
 	 */
 	function makeAttributesString(tag, profile) {
+		var p = require('profile');
 		// make attribute string
 		var attrs = '';
 		var otherAttrs = [];
 		var attrQuote = profile.attr_quotes == 'single' ? "'" : '"';
-		var cursor = profile.place_cursor ? zen_coding.require('utils').getCaretPlaceholder() : '';
-		
-		/** @type Underscore */
-		var _ = zen_coding.require('_');
+		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
 		
 		_.each(tag.attributes, function(a) {
 			switch (a.name.toLowerCase()) {
@@ -7217,7 +11007,7 @@ zen_coding.require('filters').add('bem', (function() {
 					break;
 				// process other attributes
 				default:
-					var attrName = processStringCase(a.name, profile.attr_case);
+					var attrName = p.stringCase(a.name, profile.attr_case);
 					otherAttrs.push(':' +attrName + ' => ' + attrQuote + (a.value || cursor) + attrQuote);
 			}
 		});
@@ -7232,45 +11022,25 @@ zen_coding.require('filters').add('bem', (function() {
 	 * Processes element with <code>snippet</code> type
 	 * @param {ZenNode} item
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
 	function processSnippet(item, profile, level) {
 		var data = item.source.value;
-		var utils = zen_coding.require('utils');
-		var res = zen_coding.require('resources');
+		var utils = require('utils');
 			
 		if (!data)
 			// snippet wasn't found, process it as tag
 			return processTag(item, profile, level);
 			
-		var parts = data.split(child_token),
-			start = parts[0] || '',
-			end = parts[1] || '',
-			padding = item.parent ? item.parent.padding : '';
+		var parts = data.split(childToken);
+		var start = parts[0] || '';
+		var end = parts[1] || '';
+		var padding = item.parent ? item.parent.padding : '';
 			
 		item.start = item.start.replace('%s', utils.padString(start, padding));
 		item.end = item.end.replace('%s', utils.padString(end, padding));
 		
-		var startPlaceholderNum = 100;
-		var placeholderMemo = {};
-		
-		// replace variables ID and CLASS
-		var cb = function(str, varName) {
-			var attr = item.getAttribute(varName);
-			if (attr !== null)
-				return attr;
-			
-			var varValue = res.getVariable(varName);
-			if (varValue)
-				return varValue;
-			
-			// output as placeholder
-			if (!placeholderMemo[varName])
-				placeholderMemo[varName] = startPlaceholderNum++;
-				
-			return '${' + placeholderMemo[varName] + ':' + varName + '}';
-		};
-		
+		var cb = require('tabStops').variablesResolver(item);
 		item.start = utils.replaceVariables(item.start, cb);
 		item.end = utils.replaceVariables(item.end, cb);
 		
@@ -7283,39 +11053,35 @@ zen_coding.require('filters').add('bem', (function() {
 	 * @return {Boolean}
 	 */
 	function hasBlockSibling(item) {
-		return (item.parent && item.parent.hasBlockChildren());
+		return item.parent && item.parent.hasBlockChildren();
 	}
 	
 	/**
 	 * Processes element with <code>tag</code> type
 	 * @param {ZenNode} item
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
 	function processTag(item, profile, level) {
 		if (!item.name)
 			// looks like it's root element
 			return item;
 		
-		var attrs = makeAttributesString(item, profile), 
-			content = '', 
-			cursor = profile.place_cursor ? zen_coding.require('utils').getCaretPlaceholder() : '',
-			self_closing = '',
-			is_unary = (item.isUnary() && !item.children.length),
-			start= '',
-			end = '';
-		
-		if (profile.self_closing_tag && is_unary)
-			self_closing = '/';
+		var p = require('profile');
+		var attrs = makeAttributesString(item, profile);
+		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
+		var isUnary = item.isUnary() && !item.children.length;
+		var selfClosing = profile.self_closing_tag && isUnary ? '/' : '';
+		var start= '';
 			
 		// define tag name
-		var tag_name = '%' + ((profile.tag_case == 'upper') ? item.name.toUpperCase() : item.name.toLowerCase());
-		if (tag_name.toLowerCase() == '%div' && attrs && attrs.indexOf('{') == -1)
+		var tagName = '%' + p.stringCase(item.name, profile.tag_case);
+		if (tagName.toLowerCase() == '%div' && attrs && attrs.indexOf('{') == -1)
 			// omit div tag
-			tag_name = '';
+			tagName = '';
 			
 		item.end = '';
-		start = tag_name + attrs + self_closing + ' ';
+		start = tagName + attrs + selfClosing + ' ';
 		
 		var placeholder = '%s';
 		// We can't just replace placeholder with new value because
@@ -7324,7 +11090,7 @@ zen_coding.require('filters').add('bem', (function() {
 		var pos = item.start.indexOf(placeholder);
 		item.start = item.start.substring(0, pos) + start + item.start.substring(pos + placeholder.length);
 		
-		if (!item.children.length && !is_unary)
+		if (!item.children.length && !isUnary)
 			item.start += cursor;
 		
 		return item;
@@ -7334,20 +11100,20 @@ zen_coding.require('filters').add('bem', (function() {
 	 * Processes simplified tree, making it suitable for output as HTML structure
 	 * @param {ZenNode} tree
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
-	function process(tree, profile, level) {
+	require('filters').add('haml', function process(tree, profile, level) {
 		level = level || 0;
-		/** @type Underscore */
-		var _ = zen_coding.require('_');
 		/** @type zen_coding.utils */
-		var utils = zen_coding.require('utils');
-		var editorUtils = zen_coding.require('editorUtils');
-		var elements = zen_coding.require('elements');
+		var utils = require('utils');
+		var editorUtils = require('editorUtils');
+		var elements = require('elements');
 		
-		if (level == 0)
+		if (level == 0) {
 			// preformat tree
-			tree = zen_coding.require('filters').apply(tree, '_format', profile);
+			tree = require('filters').apply(tree, '_format', profile);
+			require('tabStops').resetPlaceholderCounter();
+		}
 		
 		_.each(tree.children, function(item) {
 			item = elements.is(item.source, 'parsedElement') 
@@ -7363,101 +11129,57 @@ zen_coding.require('filters').add('bem', (function() {
 		});
 		
 		return tree;
-	}
-	
-	zen_coding.require('filters').add('haml', process);
-})();/**
+	});
+});/**
  * Filter that produces HTML tree
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- * 
- * @include "../zen_coding.js"
+ * @constructor
+ * @memberOf __htmlFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
  */
-(function(){
-	var child_token = '${child}',
-		tabstops = 0;
+zen_coding.exec(function(require, _) {
+	var childToken = '${child}';
+	var tabstops = 0;
 		
-	/**
-	 * Returns proper string case, depending on profile value
-	 * @param {String} val String to process
-	 * @param {String} case_param Profile's case value ('lower', 'upper', 'leave')
-	 */
-	function processStringCase(val, case_param) {
-		switch (String(case_param || '').toLowerCase()) {
-			case 'lower':
-				return val.toLowerCase();
-			case 'upper':
-				return val.toUpperCase();
-		}
-		
-		return val;
-	}
-	
 	/**
 	 * Creates HTML attributes string from tag according to profile settings
 	 * @param {ZenNode} tag
-	 * @param {default_profile} profile
+	 * @param {Object} profile
 	 */
 	function makeAttributesString(tag, profile) {
+		var p = require('profile');
 		// make attribute string
-		var attrs = '',
-			attr_quote = profile.attr_quotes == 'single' ? "'" : '"',
-			cursor = profile.place_cursor ? zen_coding.require('utils').getCaretPlaceholder() : '',
-			attr_name;
-			
-		for (var i = 0; i < tag.attributes.length; i++) {
-			var a = tag.attributes[i];
-			attr_name = processStringCase(a.name, profile.attr_case);
-			attrs += ' ' + attr_name + '=' + attr_quote + (a.value || cursor) + attr_quote;
-		}
+		var attrQuote = p.quote(profile.attr_quotes);
+		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
 		
-		return attrs;
+		return _.map(tag.attributes, function(a) {
+			var attrName = p.stringCase(a.name, profile.attr_case);
+			return ' ' + attrName + '=' + attrQuote + (a.value || cursor) + attrQuote;
+		}).join('');
 	}
 	
 	/**
 	 * Processes element with <code>snippet</code> type
 	 * @param {ZenNode} item
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
 	function processSnippet(item, profile, level) {
 		var data = item.source.value;
-		var utils = zen_coding.require('utils');
-		var res = zen_coding.require('resources');
-			
 		if (!data)
 			// snippet wasn't found, process it as tag
 			return processTag(item, profile, level);
 			
-		var parts = data.split(child_token),
-			start = parts[0] || '',
-			end = parts[1] || '',
-			padding = item.parent ? item.parent.padding : '';
+		var utils = require('utils');
+		var parts = data.split(childToken);
+		var padding = item.parent ? item.parent.padding : '';
 			
-			
-		item.start = item.start.replace('%s', utils.padString(start, padding));
-		item.end = item.end.replace('%s', utils.padString(end, padding));
+		item.start = item.start.replace('%s', utils.padString(parts[0] || '', padding));
+		item.end = item.end.replace('%s', utils.padString(parts[1] || '', padding));
 		
-		var startPlaceholderNum = 100;
-		var placeholderMemo = {};
-		
-		// replace variables ID and CLASS
-		var cb = function(str, varName) {
-			var attr = item.getAttribute(varName);
-			if (attr !== null)
-				return attr;
-			
-			var varValue = res.getVariable(varName);
-			if (varValue)
-				return varValue;
-			
-			// output as placeholder
-			if (!placeholderMemo[varName])
-				placeholderMemo[varName] = startPlaceholderNum++;
-				
-			return '${' + placeholderMemo[varName] + ':' + varName + '}';
-		};
-		
+		var cb = require('tabStops').variablesResolver(item);
 		item.start = utils.replaceVariables(item.start, cb);
 		item.end = utils.replaceVariables(item.end, cb);
 		
@@ -7470,41 +11192,36 @@ zen_coding.require('filters').add('bem', (function() {
 	 * @return {Boolean}
 	 */
 	function hasBlockSibling(item) {
-		return (item.parent && item.parent.hasBlockChildren());
+		return item.parent && item.parent.hasBlockChildren();
 	}
 	
 	/**
 	 * Processes element with <code>tag</code> type
 	 * @param {ZenNode} item
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
 	function processTag(item, profile, level) {
-		if (!item.name)
-			// looks like it's root element
+		if (!item.name) // looks like it's root element
 			return item;
 		
-		var attrs = makeAttributesString(item, profile), 
-			cursor = profile.place_cursor ? zen_coding.require('utils').getCaretPlaceholder() : '',
-			self_closing = '',
-			is_unary = (item.isUnary() && !item.children.length),
-			start= '',
-			end = '';
+		var p = require('profile');
 		
-		if (profile.self_closing_tag == 'xhtml')
-			self_closing = ' /';
-		else if (profile.self_closing_tag === true)
-			self_closing = '/';
+		var attrs = makeAttributesString(item, profile); 
+		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
+		var isUnary = item.isUnary() && !item.children.length;
+		var start= '';
+		var end = '';
 			
 		// define opening and closing tags
 		if (item.type != 'text') {
-			var tag_name = processStringCase(item.name, profile.tag_case);
-			if (is_unary) {
-				start = '<' + tag_name + attrs + self_closing + '>';
+			var tagName = p.stringCase(item.name, profile.tag_case);
+			if (isUnary) {
+				start = '<' + tagName + attrs + p.selfClosing(profile.self_closing_tag) + '>';
 				item.end = '';
 			} else {
-				start = '<' + tag_name + attrs + '>';
-				end = '</' + tag_name + '>';
+				start = '<' + tagName + attrs + '>';
+				end = '</' + tagName + '>';
 			}
 		}
 		
@@ -7518,7 +11235,7 @@ zen_coding.require('filters').add('bem', (function() {
 		pos = item.end.indexOf(placeholder);
 		item.end = item.end.substring(0, pos) + end + item.end.substring(pos + placeholder.length);
 		
-		if (!item.children.length && !is_unary && item.content.indexOf(cursor) == -1)
+		if (!item.children.length && !isUnary && item.content.indexOf(cursor) == -1)
 			item.start += cursor;
 		
 		return item;
@@ -7528,23 +11245,23 @@ zen_coding.require('filters').add('bem', (function() {
 	 * Processes simplified tree, making it suitable for output as HTML structure
 	 * @param {ZenNode} tree
 	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {Number} level Depth level
 	 */
-	function process(tree, profile, level) {
+	require('filters').add('html', function process(tree, profile, level) {
 		level = level || 0;
+		var ts = require('tabStops');
+		
 		if (level == 0) {
-			tree = zen_coding.require('filters').apply(tree, '_format', profile);
+			tree = require('filters').apply(tree, '_format', profile);
 			tabstops = 0;
+			ts.resetPlaceholderCounter();
 		}
 		
-		var utils = zen_coding.require('utils');
-		var editorUtils = zen_coding.require('editorUtils');
-		var elements = zen_coding.require('elements');
+		var utils = require('utils');
+		var editorUtils = require('editorUtils');
+		var elements = require('elements');
 		
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-	
-			var item = tree.children[i];
+		_.each(tree.children, function(item) {
 			item = elements.is(item.source, 'parsedElement') 
 				? processTag(item, profile, level) 
 				: processSnippet(item, profile, level);
@@ -7555,74 +11272,92 @@ zen_coding.require('filters').add('bem', (function() {
 			item.end = utils.unescapeText(utils.replaceCounter(item.end, counter));
 			item.content = utils.unescapeText(utils.replaceCounter(item.content, counter));
 			
-			tabstops += editorUtils.upgradeTabstops(item, tabstops) + 1;
+			tabstops += ts.upgrade(item, tabstops) + 1;
 			
 			process(item, profile, level + 1);
-		}
+		});
 		
 		return tree;
-	}
-	
-	zen_coding.require('filters').add('html', process);
-})();/**
+	});
+});/**
  * Output abbreviation on a single line (i.e. no line breaks)
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
+ * @constructor
+ * @memberOf __singleLineFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
  */
-(function(){
-	function process(tree, profile, level) {
-		var elements = zen_coding.require('elements');
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
+zen_coding.exec(function(require, _) {
+	var rePad = /^\s+/;
+	var reNl = /[\n\r]/g;
+	
+	require('filters').add('s', function process(tree, profile, level) {
+		var elements = require('elements');
+		_.each(tree.children, function(item) {
 			if (elements.is(item.source, 'parsedElement')) {
 				// remove padding from item 
-				var re_pad = /^\s+/;
-				item.start = item.start.replace(re_pad, '');
-				item.end = item.end.replace(re_pad, '');
+				item.start = item.start.replace(rePad, '');
+				item.end = item.end.replace(rePad, '');
 			}
 			
 			// remove newlines 
-			var re_nl = /[\n\r]/g;
-			item.start = item.start.replace(re_nl, '');
-			item.end = item.end.replace(re_nl, '');
-			item.content = item.content.replace(re_nl, '');
+			item.start = item.start.replace(reNl, '');
+			item.end = item.end.replace(reNl, '');
+			item.content = item.content.replace(reNl, '');
 			
 			process(item);
-		}
+		});
 		
 		return tree;
-	}
-	
-	zen_coding.require('filters').add('s', process);
-})();/**
+	});
+});/**
  * Trim filter: removes characters at the beginning of the text
- *  content that indicates lists: numbers, #, *, -, etc.
+ * content that indicates lists: numbers, #, *, -, etc.
+ * 
+ * Useful for wrapping lists with abbreviation.
+ * 
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
+ * 
+ * @constructor
+ * @memberOf __trimFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
  */
-(function(){
-	function process(tree, profile, level) {
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
-			
+zen_coding.exec(function(require, _) {
+	require('preferences').set('filter.trimRegexp', '[\\s|\\u00a0]*[\\d|#|\\-|\*|\\u2022]+\\.?\\s*',
+			'Regular expression used to remove list markers (numbers, dashes, ' 
+			+ 'bullets, etc.) in <code>t</code> (trim) filter. The trim filter '
+			+ 'is useful for wrapping with abbreviation lists, pased from other ' 
+			+ 'documents (for example, Word documents).');
+	
+	function process(tree, re) {
+		_.each(tree.children, function(item) {
 			if (item.content)
-				item.content = item.content.replace(/^([\s|\u00a0])?[\d|#|\-|\*|\u2022]+\.?\s*/, '$1');
+				item.content = item.content.replace(re, '');
 			
 			process(item);
-		}
+		});
 		
 		return tree;
 	}
 	
-	zen_coding.require('filters').add('t', process);
-})();/**
+	require('filters').add('t', function(tree) {
+		var re = new RegExp(require('preferences').get('filter.trimRegexp'));
+		return process(tree, re);
+	});
+});/**
  * Filter for trimming "select" attributes from some tags that contains
  * child elements
  * @author Sergey Chikuyonok (serge.che@gmail.com)
  * @link http://chikuyonok.ru
- */(function(){
+ * 
+ * @constructor
+ * @memberOf __xslFilterDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */zen_coding.exec(function(require, _) {
 	var tags = {
 		'xsl:variable': 1,
 		'xsl:with-param': 1
@@ -7636,1842 +11371,21 @@ zen_coding.require('filters').add('bem', (function() {
 		node.start = node.start.replace(/\s+select\s*=\s*(['"]).*?\1/, '');
 	}
 	
-	function process(tree) {
-		var elements = zen_coding.require('elements');
-		for (var i = 0, il = tree.children.length; i < il; i++) {
-			/** @type {ZenNode} */
-			var item = tree.children[i];
-			if (elements.is(item.source, 'parsedElement') && item.name.toLowerCase() in tags && item.children.length)
+	require('filters').add('xsl', function process(tree) {
+		var elements = require('elements');
+		_.each(tree.children, function(item) {
+			if (elements.is(item.source, 'parsedElement')
+					&& (item.name || '').toLowerCase() in tags 
+					&& item.children.length)
 				trimAttribute(item);
 			process(item);
-		}
-	}
-	
-	zen_coding.require('filters').add('xsl', process);
-})();/**
- * Encodes/decodes image under cursor to/from base64
- * @param {IZenEditor} editor
- * @since 0.65
- */
-(function() {
-	zen_coding.require('actions').add('encode_decode_data_url', function(editor) {
-		var data = String(editor.getSelection());
-		var caretPos = editor.getCaretPos();
-			
-		if (!data) {
-			// no selection, try to find image bounds from current caret position
-			var text = String(editor.getContent()), ch, m;
-			while (caretPos-- >= 0) {
-				if (startsWith('src=', text, caretPos)) { // found <img src="">
-					if (m = text.substr(caretPos).match(/^(src=(["'])?)([^'"<>\s]+)\1?/)) {
-						data = m[3];
-						caretPos += m[1].length;
-					}
-					break;
-				} else if (startsWith('url(', text, caretPos)) { // found CSS url() pattern
-					if (m = text.substr(caretPos).match(/^(url\((['"])?)([^'"\)\s]+)\1?/)) {
-						data = m[3];
-						caretPos += m[1].length;
-					}
-					break;
-				}
-			}
-		}
-		
-		if (data) {
-			if (startsWith('data:', data))
-				return decodeFromBase64(editor, data, caretPos);
-			else
-				return encodeToBase64(editor, data, caretPos);
-		}
-		
-		return false;
-	});
-	
-	/**
-	 * Test if <code>text</code> starts with <code>token</code> at <code>pos</code>
-	 * position. If <code>pos</code> is ommited, search from beginning of text 
-	 * @param {String} token Token to test
-	 * @param {String} text Where to search
-	 * @param {Number} pos Position where to start search
-	 * @return {Boolean}
-	 * @since 0.65
-	 */
-	function startsWith(token, text, pos) {
-		pos = pos || 0;
-		return text.charAt(pos) == token.charAt(0) && text.substr(pos, token.length) == token;
-	}
-	
-	/**
-	 * Encodes image to base64
-	 * @requires zen_file
-	 * 
-	 * @param {zen_editor} editor
-	 * @param {String} imgPath Path to image
-	 * @param {Number} pos Caret position where image is located in the editor
-	 * @return {Boolean}
-	 */
-	function encodeToBase64(editor, imgPath, pos) {
-		var file = zen_coding.require('file');
-		var actionUtils = zen_coding.require('actionUtils');
-		
-		var editorFile = editor.getFilePath();
-		var defaultMimeType = 'application/octet-stream';
-			
-		if (editorFile === null) {
-			throw "You should save your file before using this action";
-		}
-		
-		// locate real image path
-		var realImgPath = file.locateFile(editorFile, imgPath);
-		if (realImgPath === null) {
-			throw "Can't find " + imgPath + ' file';
-		}
-		
-		var b64 = zen_coding.require('base64').encode(String(file.read(realImgPath)));
-		if (!b64) {
-			throw "Can't encode file content to base64";
-		}
-		
-		b64 = 'data:' + (actionUtils.mimeTypes[String(file.getExt(realImgPath))] || defaultMimeType) +
-			';base64,' + b64;
-			
-		editor.replaceContent('$0' + b64, pos, pos + imgPath.length);
-		return true;
-	}
-
-	/**
-	 * Decodes base64 string back to file.
-	 * @requires zen_editor.prompt
-	 * @requires zen_file
-	 * 
-	 * @param {zen_editor} editor
-	 * @param {String} data Base64-encoded file content
-	 * @param {Number} pos Caret position where image is located in the editor
-	 */
-	function decodeFromBase64(editor, data, pos) {
-		// ask user to enter path to file
-		var filePath = String(editor.prompt('Enter path to file (absolute or relative)'));
-		if (!filePath)
-			return false;
-			
-		var absPath = zen_file.createPath(editor.getFilePath(), filePath);
-		if (!absPath) {
-			throw "Can't save file";
-		}
-		
-		zen_coding.require('file').save(absPath, zen_coding.require('base64').decode( data.replace(/^data\:.+?;.+?,/, '') ));
-		editor.replaceContent('$0' + filePath, pos, pos + data.length);
-		return true;
-	}
-})();
-/**
- * Move between next/prev edit points. 'Edit points' are places between tags 
- * and quotes of empty attributes in html
- */
-(function() {
-	/** @type zen_coding.actions */
-	var actions = zen_coding.require('actions');
-	/**
-	 * Search for new caret insertion point
-	 * @param {zen_editor} editor Editor instance
-	 * @param {Number} inc Search increment: -1 — search left, 1 — search right
-	 * @param {Number} offset Initial offset relative to current caret position
-	 * @return {Number} Returns -1 if insertion point wasn't found
-	 */
-	function findNewEditPoint(editor, inc, offset) {
-		inc = inc || 1;
-		offset = offset || 0;
-		
-		var curPoint = editor.getCaretPos() + offset;
-		var content = String(editor.getContent());
-		var maxLen = content.length;
-		var nextPoint = -1;
-		var reEmptyLine = /^\s+$/;
-		
-		function ch(ix) {
-			return content.charAt(ix);
-		}
-		
-		function getLine(ix) {
-			var start = ix;
-			while (start >= 0) {
-				var c = ch(start);
-				if (c == '\n' || c == '\r')
-					break;
-				start--;
-			}
-			
-			return content.substring(start, ix);
-		}
-			
-		while (curPoint < maxLen && curPoint > 0) {
-			curPoint += inc;
-			var cur_char = ch(curPoint),
-				next_char = ch(curPoint + 1),
-				prev_char = ch(curPoint - 1);
-				
-			switch (cur_char) {
-				case '"':
-				case '\'':
-					if (next_char == cur_char && prev_char == '=') {
-						// empty attribute
-						nextPoint = curPoint + 1;
-					}
-					break;
-				case '>':
-					if (next_char == '<') {
-						// between tags
-						nextPoint = curPoint + 1;
-					}
-					break;
-				case '\n':
-				case '\r':
-					// empty line
-					if (reEmptyLine.test(getLine(curPoint - 1))) {
-						nextPoint = curPoint;
-					}
-					break;
-			}
-			
-			if (nextPoint != -1)
-				break;
-		}
-		
-		return nextPoint;
-	}
-		
-	/**
-	 * Move caret to previous edit point
-	 * @param {zen_editor} editor Editor instance
-	 */
-	actions.add('prev_edit_point', function(editor) {
-		var curPos = editor.getCaretPos();
-		var newPoint = findNewEditPoint(editor, -1);
-			
-		if (newPoint == curPos)
-			// we're still in the same point, try searching from the other place
-			newPoint = findNewEditPoint(editor, -1, -2);
-		
-		if (newPoint != -1) {
-			editor.setCaretPos(newPoint);
-			return true;
-		}
-		
-		return false;
-	});
-	
-	/**
-	 * Move caret to next edit point
-	 * @param {zen_editor} editor Editor instance
-	 */
-	actions.add('next_edit_point', function(editor) {
-		var newPoint = findNewEditPoint(editor, 1);
-		if (newPoint != -1)
-			editor.setCaretPos(newPoint);
-	});
-})();/**
- * Evaluates simple math expression under caret
- * @param {IZenEditor} editor
- */
-zen_coding.require('actions').add('evaluate_math_expression', function(editor) {
-	var actionUtils = zen_coding.require('actionUtils');
-	var utils = zen_coding.require('utils');
-	
-	var content = String(editor.getContent());
-	var chars = '.+-*/\\';
-		
-	var r = actionUtils.findExpressionBounds(editor, function(ch) {
-		return utils.isNumeric(ch) || chars.indexOf(ch) != -1;
-	});
-		
-	if (r) {
-		var expr = content.substring(r[0], r[1]);
-		
-		// replace integral division: 11\2 => Math.round(11/2) 
-		expr = expr.replace(/([\d\.\-]+)\\([\d\.\-]+)/g, 'Math.round($1/$2)');
-		
-		try {
-			var result = new Function('return ' + expr)();
-			result = utils.prettifyNumber(result);
-			editor.replaceContent(result, r[0], r[1]);
-			editor.setCaretPos(r[0] + result.length);
-			return true;
-		} catch (e) {}
-	}
-	
-	return false;
-});
-(function() {
-	var actions = zen_coding.require('actions');
-	
-	/**
-	 * Search for abbreviation in editor from current caret position
-	 * @param {IZenEditor} editor Editor instance
-	 * @return {String}
-	 */
-	function findAbbreviation(editor) {
-		var range = editor.getSelectionRange();
-		var content = String(editor.getContent());
-		if (range.start != range.end) {
-			// abbreviation is selected by user
-			return content.substring(range.start, range.end);
-		}
-		
-		// search for new abbreviation from current caret position
-		var curLine = editor.getCurrentLineRange();
-		return zen_coding.require('actionUtils').extractAbbreviation(content.substring(curLine.start, range.start));
-	}
-	
-	/**
-	 * 'Expand abbreviation' editor action: extracts abbreviation from current caret 
-	 * position and replaces it with formatted output 
-	 * @param {IZenEditor} editor Editor instance
-	 * @param {String} syntax Syntax type (html, css, etc.)
-	 * @param {String} profile Output profile name (html, xml, xhtml)
-	 * @return {Boolean} Returns <code>true</code> if abbreviation was expanded 
-	 * successfully
-	 */
-	actions.add('expand_abbreviation', function(editor, syntax, profile) {
-		syntax = String(syntax || editor.getSyntax());
-		profile = String(profile || editor.getProfileName());
-		
-		var caretPos = editor.getSelectionRange().end;
-		var abbr;
-		var content = '';
-			
-		if ( (abbr = findAbbreviation(editor)) ) {
-			content = zen_coding.expandAbbreviation(abbr, syntax, profile, 
-					zen_coding.require('actionUtils').captureContext(editor));
-			if (content) {
-				editor.replaceContent(content, caretPos - abbr.length, caretPos);
-				return true;
-			}
-		}
-		
-		return false;
-	});
-	
-	/**
-	 * A special version of <code>expandAbbreviation</code> function: if it can't
-	 * find abbreviation, it will place Tab character at caret position
-	 * @param {IZenEditor} editor Editor instance
-	 * @param {String} syntax Syntax type (html, css, etc.)
-	 * @param {String} profile Output profile name (html, xml, xhtml)
-	 */
-	actions.add('expand_abbreviation_with_tab', function(editor, syntax, profile) {
-		if (!actions.run('expand_abbreviation', editor, syntax, profile))
-			editor.replaceContent(zen_coding.require('resources').getVariable('indentation'), editor.getCaretPos());
-	});
-})();/**
- * Increment/decrement number under cursor
- */
-(function() {
-	/**
-	 * Extract number from current caret position of the <code>editor</code> and
-	 * increment it by <code>step</code>
-	 * @param {zen_editor} editor
-	 * @param {Number} step Increment step (may be negative)
-	 */
-	function incrementNumber(editor, step) {
-		var utils = zen_coding.require('utils');
-		var actionUtils = zen_coding.require('actionUtils');
-		
-		var hasSign = false;
-		var hasDecimal = false;
-			
-		var r = actionUtils.findExpressionBounds(editor, function(ch, pos, content) {
-			if (utils.isNumeric(ch))
-				return true;
-			if (ch == '.') {
-				// make sure that next character is numeric too
-				if (!utils.isNumeric(content.charAt(pos + 1)))
-					return false;
-				
-				return hasDecimal ? false : hasDecimal = true;
-			}
-			if (ch == '-')
-				return hasSign ? false : hasSign = true;
-				
-			return false;
 		});
-			
-		if (r) {
-			var num = parseFloat(String(editor.getContent()).substring(r[0], r[1]));
-			if (!isNaN(num)) {
-				num = utils.prettifyNumber(num + step);
-				editor.replaceContent(num, r[0], r[1]);
-				editor.createSelection(r[0], r[0] + num.length);
-				return true;
-			}
-		}
 		
-		return false;
-	}
-	
-	var actions = zen_coding.require('actions');
-	_.each([1, -1, 10, -10, 0.1, -0.1], function(num) {
-		var prefix = num > 0 ? 'increment' : 'decrement';
-		
-		actions.add(prefix + '_number_by_' + String(Math.abs(num)).replace('.', '').substring(0, 2), function(editor) {
-			return incrementNumber(editor, num);
-		});
+		return tree;
 	});
-})();/**
- * Actions to insert line breaks. Some simple editors (like browser's 
- * &lt;textarea&gt;, for example) do not provide such simple things
- */
-(function() {
-	var actions = zen_coding.require('actions');
-	
-	/**
-	 * Inserts newline character with proper indentation in specific positions only.
-	 * @param {IZenEditor} editor
-	 * @return {Boolean} Returns <code>true</code> if line break was inserted 
-	 */
-	actions.add('insert_formatted_line_break_only', function(editor) {
-		var utils = zen_coding.require('utils');
-		/** @type zen_coding.editorUtils */
-		var editorUtils = zen_coding.require('editorUtils');
-		var matcher = zen_coding.require('html_matcher');
-		/** @type zen_coding.resources */
-		var res = zen_coding.require('resources');
-		
-		var info = editorUtils.outputInfo(editor);
-		var caretPos = editor.getCaretPos();
-		var nl = utils.getNewline();
-		var pad = res.getVariable('indentation');
-		
-			
-		if (info.syntax == 'html') {
-			// let's see if we're breaking newly created tag
-			var pair = matcher.getTags(info.content, caretPos, info.profile);
-			
-			if (pair[0] && pair[1] && pair[0].type == 'tag' && pair[0].end == caretPos && pair[1].start == caretPos) {
-				editor.replaceContent(nl + pad + utils.getCaretPlaceholder() + nl, caretPos);
-				return true;
-			}
-		} else if (info.syntax == 'css') {
-			if (caretPos && info.content.charAt(caretPos - 1) == '{') {
-				// look ahead for a closing brace
-				for (var i = caretPos, il = info.content.length, ch; i < il; i++) {
-					ch = info.content.charAt(i);
-					if (ch == '}') return false;
-					if (ch == '{') break;
-				}
-				
-				// defining rule set
-				var insValue = nl + pad + utils.getCaretPlaceholder() + nl;
-				var hasCloseBrace = caretPos < info.content.length && info.content.charAt(caretPos) == '}';
-					
-				var userCloseBrace = res.getVariable('close_css_brace');
-				if (userCloseBrace) {
-					// user defined how close brace should look like
-					insValue += utils.replaceVariables(userCloseBrace);
-				} else if (!hasCloseBrace) {
-					insValue += '}';
-				}
-				
-				editor.replaceContent(insValue, caretPos, caretPos + (hasCloseBrace ? 1 : 0));
-				return true;
-			}
-		}
-			
-		return false;
-	});
-	
-	/**
-	 * Inserts newline character with proper indentation. This action is used in
-	 * editors that doesn't have indentation control (like textarea element) to 
-	 * provide proper indentation
-	 * @param {IZenEditor} editor Editor instance
-	 */
-	actions.add('insert_formatted_line_break', function(editor) {
-		if (!actions.run('insert_formatted_line_break_only', editor)) {
-			var editorUtils = zen_coding.require('editorUtils');
-			var utils = zen_coding.require('utils');
-			
-			var curPadding = editorUtils.getCurrentLinePadding(editor);
-			var content = String(editor.getContent());
-			var caret_pos = editor.getCaretPos();
-			var c_len = content.length;
-			var nl = utils.getNewline();
-				
-			// check out next line padding
-			var lineRange = editor.getCurrentLineRange();
-			var nextPadding = '';
-				
-			for (var i = lineRange.end + 1, ch; i < c_len; i++) {
-				ch = content.charAt(i);
-				if (ch == ' ' || ch == '\t')
-					nextPadding += ch;
-				else
-					break;
-			}
-			
-			if (nextPadding.length > curPadding.length)
-				editor.replaceContent(nl + nextPadding, caret_pos, caret_pos, true);
-			else
-				editor.replaceContent(nl, caret_pos);
-		}
-		
-		return true;
-	});
-})();/**
- * HTML pair matching (balancing) actions
- */
-(function() {
-	/** @type zen_coding.actions */
-	var actions = zen_coding.require('actions');
-	var matcher = zen_coding.require('html_matcher');
-	
-	/**
-	 * Find and select HTML tag pair
-	 * @param {IZenEditor} editor Editor instance
-	 * @param {String} direction Direction of pair matching: 'in' or 'out'. 
-	 * Default is 'out'
-	 */
-	function matchPair(editor, direction, syntax) {
-		direction = String((direction || 'out').toLowerCase());
-		syntax = String(syntax || editor.getProfileName());
-		
-		var range = editor.getSelectionRange();
-		var cursor = range.end;
-		var rangeStart = range.start; 
-		var rangeEnd = range.end;
-		var content = String(editor.getContent());
-		var range = null;
-		var _r;
-		
-		var oldOpenTag = matcher.last_match['opening_tag'];
-		var oldCloseTag = matcher.last_match['closing_tag'];
-			
-		if (direction == 'in' && oldOpenTag && rangeStart != rangeEnd) {
-//			user has previously selected tag and wants to move inward
-			if (!oldCloseTag) {
-//				unary tag was selected, can't move inward
-				return false;
-			} else if (oldOpenTag.start == rangeStart) {
-				if (content.charAt(oldOpenTag.end) == '<') {
-//					test if the first inward tag matches the entire parent tag's content
-					_r = matcher.find(content, oldOpenTag.end + 1, syntax);
-					if (_r[0] == oldOpenTag.end && _r[1] == oldCloseTag.start) {
-						range = matcher(content, oldOpenTag.end + 1, syntax);
-					} else {
-						range = [oldOpenTag.end, oldCloseTag.start];
-					}
-				} else {
-					range = [oldOpenTag.end, oldCloseTag.start];
-				}
-			} else {
-				var new_cursor = content.substring(0, oldCloseTag.start).indexOf('<', oldOpenTag.end);
-				var search_pos = new_cursor != -1 ? new_cursor + 1 : oldOpenTag.end;
-				range = matcher(content, search_pos, syntax);
-			}
-		} else {
-			range = matcher(content, cursor, syntax);
-		}
-		
-		if (range !== null && range[0] != -1) {
-			editor.createSelection(range[0], range[1]);
-			return true;
-		}
-		
-		return false;
-	}
-	
-	actions.add('match_pair', matchPair);
-	actions.add('match_pair_inward', function(editor){
-		return matchPair(editor, 'in');
-	});
-
-	actions.add('match_pair_outward', function(editor){
-		return matchPair(editor, 'out');
-	});
-	
-	/**
-	 * Moves caret to matching opening or closing tag
-	 * @param {IZenEditor} editor
-	 */
-	actions.add('matching_pair', function(editor) {
-		var content = String(editor.getContent());
-		var caretPos = editor.getCaretPos();
-		
-		if (content.charAt(caretPos) == '<') 
-			// looks like caret is outside of tag pair  
-			caretPos++;
-			
-		var tags = matcher.getTags(content, caretPos, String(editor.getProfileName()));
-			
-		if (tags && tags[0]) {
-			// match found
-			var openTag = tags[0];
-			var closeTag = tags[1];
-				
-			if (closeTag) { // exclude unary tags
-				if (openTag.start <= caretPos && openTag.end >= caretPos) {
-					editor.setCaretPos(closeTag.start);
-					return true;
-				} else if (closeTag.start <= caretPos && closeTag.end >= caretPos){
-					editor.setCaretPos(openTag.start);
-					return true;
-				}
-			}
-		}
-		
-		return false;
-	});
-})();/**
- * Merges selected lines or lines between XHTML tag pairs
- */
-zen_coding.require('actions').add('merge_lines', function(editor) {
-	var matcher = zen_coding.require('html_matcher');
-	var utils = zen_coding.require('utils');
-	var editorUtils = zen_coding.require('editorUtils');
-	
-	var info = editorUtils.outputInfo(editor);
-	
-	
-	var selection = editor.getSelectionRange();
-	if (selection.start == selection.end) {
-		// find matching tag
-		var pair = matcher(info.content, editor.getCaretPos(), info.profile);
-		if (pair) {
-			selection.start = pair[0];
-			selection.end = pair[1];
-		}
-	}
-	
-	if (selection.start != selection.end) {
-		// got range, merge lines
-		var text = info.content.substring(selection.start, selection.end);
-		var oldLength = text.length;
-		var lines = utils.splitByLines(text);
-		
-		for (var i = 1; i < lines.length; i++) {
-			lines[i] = lines[i].replace(/^\s+/, '');
-		}
-		
-		text = lines.join('').replace(/\s{2,}/, ' ');
-		editor.replaceContent(text, selection.start, selection.end);
-		editor.createSelection(selection.start, selection.start + text.length);
-		
-		return true;
-	}
-	
-	return false;
 });/**
- * Reflect CSS value: takes rule's value under caret and pastes it for the same 
- * rules with vendor prefixes
- * @constructor
- * @memberOf __zenReflectCSSAction
- */
-(function() {
-	zen_coding.require('actions').add('reflect_css_value', function(editor) {
-		if (editor.getSyntax() != 'css') return false;
-		
-		return zen_coding.require('actionUtils').compoundUpdate(editor, doCSSReflection(editor));
-	});
-	
-	function doCSSReflection(editor) {
-		/** @type zen_coding.parserUtils */
-		var parserUtils = zen_coding.require('parserUtils');
-		
-		var content = String(editor.getContent());
-		var caretPos = editor.getCaretPos();
-		var css = parserUtils.extractCSSRule(content, caretPos);
-		var v;
-			
-		if (!css || caretPos < css[0] || caretPos > css[1])
-			// no matching CSS rule or caret outside rule bounds
-			return false;
-			
-		var tokens = parserUtils.parseCSS(content.substring(css[0], css[1]), css[0]);
-		var token_ix = parserUtils.findTokenFromPosition(tokens, caretPos, 'identifier');
-		
-		if (token_ix != -1) {
-			var cur_prop = tokens[token_ix].content;
-			var value_token = parserUtils.findValueToken(tokens, token_ix + 1);
-			var base_name = parserUtils.getBaseCSSName(cur_prop);
-			var re_name = new RegExp('^(?:\\-\\w+\\-)?' + base_name + '$');
-			var re_name = getReflectedCSSName(base_name);
-			var values = [];
-				
-			if (!value_token) return false;
-				
-			// search for all vendor-prefixed properties
-			for (var i = 0, token, il = tokens.length; i < il; i++) {
-				token = tokens[i];
-				if (token.type == 'identifier' && re_name.test(token.content) && token.content != cur_prop) {
-					v = parserUtils.findValueToken(tokens, i + 1);
-					if (v) 
-						values.push({name: token, value: v});
-				}
-			}
-			
-			// some editors do not provide easy way to replace multiple code 
-			// fragments so we have to squash all replace operations into one
-			if (values.length) {
-				var data = content.substring(values[0].value.start, values[values.length - 1].value.end);
-				var offset = values[0].value.start;
-				var value = value_token.content;
-				var rv;
-					
-				for (var i = values.length - 1; i >= 0; i--) {
-					v = values[i].value;
-					rv = getReflectedValue(cur_prop, value, values[i].name.content, v.content);
-					data = replaceSubstring(data, v.start - offset, v.end - offset, rv);
-						
-					// also calculate new caret position
-					if (v.start < caretPos) {
-						caretPos += rv.length - v.content.length;
-					}
-				}
-				
-				return {
-					'data': data,
-					'start': offset,
-					'end': values[values.length - 1].value.end,
-					'caret': caretPos
-				};
-			}
-		}
-	}
-	
-	/**
-	 * Returns regexp that should match reflected CSS property names
-	 * @param {String} name Current CSS property name
-	 * @return {RegExp}
-	 */
-	function getReflectedCSSName(name) {
-		name = zen_coding.require('parserUtils').getBaseCSSName(name);
-		var vendorPrefix = '^(?:\\-\\w+\\-)?', m;
-		
-		if (name == 'opacity' || name == 'filter') {
-			return new RegExp(vendorPrefix + '(?:opacity|filter)$');
-		} else if (m = name.match(/^border-radius-(top|bottom)(left|right)/)) {
-			// Mozilla-style border radius
-			return new RegExp(vendorPrefix + '(?:' + name + '|border-' + m[1] + '-' + m[2] + '-radius)$');
-		} else if (m = name.match(/^border-(top|bottom)-(left|right)-radius/)) { 
-			return new RegExp(vendorPrefix + '(?:' + name + '|border-radius-' + m[1] + m[2] + ')$');
-		}
-		
-		return new RegExp(vendorPrefix + name + '$');
-	}
-	
-	/**
-	 * Returns value that should be reflected for <code>ref_name</code> CSS property
-	 * from <code>cur_name</code> property. This function is used for special cases,
-	 * when the same result must be achieved with different properties for different
-	 * browsers. For example: opаcity:0.5; -> filter:alpha(opacity=50);<br><br>
-	 * 
-	 * This function does value conversion between different CSS properties
-	 * 
-	 * @param {String} curName Current CSS property name
-	 * @param {String} curValue Current CSS property value
-	 * @param {String} refName Receiver CSS property's name 
-	 * @param {String} refValue Receiver CSS property's value
-	 * @return {String} New value for receiver property
-	 */
-	function getReflectedValue(curName, curValue, refName, refValue) {
-		var parserUtils = zen_coding.require('parserUtils');
-		var utils = zen_coding.require('utils');
-		curName = parserUtils.getBaseCSSName(curName);
-		refName = parserUtils.getBaseCSSName(refName);
-		
-		if (curName == 'opacity' && refName == 'filter') {
-			return refValue.replace(/opacity=[^)]*/i, 'opacity=' + Math.floor(parseFloat(curValue) * 100));
-		} else if (curName == 'filter' && refName == 'opacity') {
-			var m = curValue.match(/opacity=([^)]*)/i);
-			return m ? utils.prettifyNumber(parseInt(m[1]) / 100) : refValue;
-		}
-		
-		return curValue;
-	}
-	
-	/**
-	 * Replace substring of <code>text</code>, defined by <code>start</code> and 
-	 * <code>end</code> indexes with <code>new_value</code>
-	 * @param {String} text
-	 * @param {Number} start
-	 * @param {Number} end
-	 * @param {String} new_value
-	 * @return {String}
-	 */
-	function replaceSubstring(text, start, end, new_value) {
-		return text.substring(0, start) + new_value + text.substring(end);
-	}
-})();/**
- * Gracefully removes tag under cursor
- * @param {IZenEditor} editor
- */
-zen_coding.require('actions').add('remove_tag', function(editor) {
-	var utils = zen_coding.require('utils');
-	var actionUtils = zen_coding.require('actionUtils');
-	var editorUtils = zen_coding.require('editorUtils');
-	var matcher = zen_coding.require('html_matcher');
-	
-	var info = zen_coding.require('editorUtils').outputInfo(editor);
-	var caretPos = editor.getCaretPos();
-		
-	// search for tag
-	var pair = matcher.getTags(info.content, caretPos, info.profile);
-	if (pair && pair[0]) {
-		if (!pair[1]) {
-			// simply remove unary tag
-			editor.replaceContent(utils.getCaretPlaceholder(), pair[0].start, pair[0].end);
-		} else {
-			var tagContentRange = editorUtils.narrowToNonSpace(info.content, pair[0].end, pair[1].start);
-			var startLineBounds = actionUtils.getLineBounds(info.content, tagContentRange[0]);
-			var startLinePad = utils.getLinePadding(info.content.substring(startLineBounds.start, startLineBounds.end));
-			var tagContent = info.content.substring(tagContentRange[0], tagContentRange[1]);
-				
-			tagContent = utils.unindentString(tagContent, startLinePad);
-			editor.replaceContent(utils.getCaretPlaceholder() + tagContent, pair[0].start, pair[1].end);
-		}
-		
-		return true;
-	}
-	
-	return false;
-});
-/**
- * Actions that use stream parsers and tokenizers for traversing:
- * -- Search for next/previous items in HTML
- * -- Search for next/previous items in CSS
- * @constructor
- * @memberOf __zenSelectItemAction
- */
-(function(){
-	var startTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/;
-	var knownXMLTypes = {
-		'xml-tagname': 1,
-		'xml-attname': 1,
-		'xml-attribute': 1
-	};
-	var knownCSSTypes = {
-		'selector': 1,
-		'identifier': 1,
-		'value': 1
-	};
-	
-	/**
-	 * Find next HTML item
-	 * @param {zen_editor} editor
-	 */
-	function findNextHTMLItem(editor) {
-		var isFirst = true;
-		return findItem(editor, false, function(content, search_pos){
-			if (isFirst) {
-				isFirst = false;
-				return findOpeningTagFromPosition(content, search_pos);
-			} else {
-				return getOpeningTagFromPosition(content, search_pos);
-			}
-		}, getRangeForNextItemInHTML);
-	}
-	
-	/**
-	 * Find previous HTML item
-	 * @param {zen_editor} editor
-	 */
-	function findPrevHTMLItem(editor) {
-		return findItem(editor, true, getOpeningTagFromPosition, getRangeForPrevItemInHTML);
-	}
-	
-	/**
-	 * Returns range for item to be selected in tag after current caret position
-	 * @param {String} tag Tag declaration
-	 * @param {Number} offset Tag's position index inside content
-	 * @param {Number} sel_start Start index of user selection
-	 * @param {Number} sel_end End index of user selection
-	 * @return {Array} Returns array with two indexes if next item was found, 
-	 * <code>null</code> otherwise
-	 */
-	function getRangeForNextItemInHTML(tag, offset, sel_start, sel_end) {
-		var parserUtils = zen_coding.require('parserUtils');
-		var tokens = parserUtils.parseHTML(tag, offset);
-		var next = [];
-				
-		// search for token that is right to selection
-		for (var i = 0, il = tokens.length; i < il; i++) {
-			/** @type {syntaxToken} */
-			var token = tokens[i], pos_test;
-			if (token.type in knownXMLTypes) {
-				// check token position
-				pos_test = token.start >= sel_start;
-				if (token.type == 'xml-attribute' && isQuote(token.content.charAt(0)))
-					pos_test = token.start + 1 >= sel_start && token.end -1 != sel_end;
-				
-				if (!pos_test && !(sel_start == sel_end && token.end > sel_start)) continue;
-				
-				// found token that should be selected
-				if (token.type == 'xml-attname') {
-					next = handleFullAttributeHTML(tokens, i, sel_end <= token.end ? token.start : -1);
-					if (next) return next;
-				} else if (token.end > sel_end) {
-					next = [token.start, token.end];
-					
-					if (token.type == 'xml-attribute')
-						next = handleQuotesHTML(token.content, next);
-						
-					if (sel_start == next[0] && sel_end == next[1])
-						// in case of empty attribute
-						continue;
-					
-					return next;
-				}
-			}
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Returns range for item to be selected in tag before current caret position
-	 * @param {String} tag Tag declaration
-	 * @param {Number} offset Tag's position index inside content
-	 * @param {Number} sel_start Start index of user selection
-	 * @param {Number} sel_end End index of user selection
-	 * @return {Array} Returns array with two indexes if next item was found, 
-	 * <code>null</code> otherwise
-	 */
-	function getRangeForPrevItemInHTML(tag, offset, sel_start, sel_end) {
-		var parserUtils = zen_coding.require('parserUtils');
-		var tokens = parserUtils.parseHTML(tag, offset);
-		var next;
-				
-		// search for token that is left to the selection
-		for (var i = tokens.length - 1, il = tokens.length; i >= 0; i--) {
-			/** @type {syntaxToken} */
-			var token = tokens[i], pos_test;
-			if (token.type in knownXMLTypes) {
-				// check token position
-				pos_test = token.start < sel_start;
-				if (token.type == 'xml-attribute' && isQuote(token.content.charAt(0))) {
-					pos_test = token.start + 1 < sel_start;
-				}
-				
-				if (!pos_test) continue;
-				
-				// found token that should be selected
-				if (token.type == 'xml-attname') {
-					next = handleFullAttributeHTML(tokens, i, token.start);
-					if (next) return next;
-				} else {
-					next = [token.start, token.end];
-					
-					if (token.type == 'xml-attribute')
-						next = handleQuotesHTML(token.content, next);
-					
-					return next;
-				}
-			}
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Search for opening tag in content, starting at specified position
-	 * @param {String} html Where to search tag
-	 * @param {Number} pos Character index where to start searching
-	 * @return {Array} Returns array with tag indexes if valid opening tag was found,
-	 * <code>null</code> otherwise
-	 */
-	function findOpeningTagFromPosition(html, pos) {
-		var tag;
-		while (pos >= 0) {
-			if (tag = getOpeningTagFromPosition(html, pos))
-				return tag;
-			pos--;
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * @param {String} html Where to search tag
-	 * @param {Number} pos Character index where to start searching
-	 * @return {Array} Returns array with tag indexes if valid opening tag was found,
-	 * <code>null</code> otherwise
-	 */
-	function getOpeningTagFromPosition(html, pos) {
-		var m;
-		if (html.charAt(pos) == '<' && (m = html.substring(pos, html.length).match(startTag))) {
-			return [pos, pos + m[0].length];
-		}
-	}
-	
-	function isQuote(ch) {
-		return ch == '"' || ch == "'";
-	}
-	
-	/**
-	 * Find item
-	 * @param {zen_editor} editor
-	 * @param {String} is_backward Search backward (search forward otherwise)
-	 * @param {Function} extract_fn Function that extracts item content
-	 * @param {Function} range_rn Function that search for next token range
-	 */
-	function findItem(editor, is_backward, extract_fn, range_fn) {
-		var content = String(editor.getContent());
-		var contentLength = content.length;
-		var item, itemDef, rng;
-		var prev_range = [-1, -1];
-		var sel = editor.getSelectionRange();
-		var selStart = Math.min(sel.start, sel.end);
-		var selEnd = Math.max(sel.start, sel.end);
-			
-		var searchPos = selStart, loop = 100000; // endless loop protection
-		while (searchPos >= 0 && searchPos < contentLength && loop > 0) {
-			loop--;
-			if ( (item = extract_fn(content, searchPos, is_backward)) ) {
-				if (prev_range[0] == item[0] && prev_range[1] == item[1]) {
-					break;
-				}
-				
-				prev_range[0] = item[0];
-				prev_range[1] = item[1];
-				itemDef = content.substring(item[0], item[1]);
-				rng = range_fn(itemDef, item[0], selStart, selEnd);
-					
-				if (rng) {
-					editor.createSelection(rng[0], rng[1]);
-					return true;
-				} else {
-					searchPos = is_backward ? item[0] : item[1] - 1;
-				}
-			}
-			
-			searchPos += is_backward ? -1 : 1;
-		}
-		
-		return false;
-	}
-	
-	function findNextCSSItem(editor) {
-		return findItem(editor, false, zen_coding.require('parserUtils').extractCSSRule, getRangeForNextItemInCSS);
-	}
-	
-	function findPrevCSSItem(editor) {
-		return findItem(editor, true, zen_coding.require('parserUtils').extractCSSRule, getRangeForPrevItemInCSS);
-	}
-	
-	/**
-	 * Returns range for item to be selected in tag after current caret position
-	 * @param {String} rule CSS rule declaration
-	 * @param {Number} offset Rule's position index inside content
-	 * @param {Number} selStart Start index of user selection
-	 * @param {Number} selEnd End index of user selection
-	 * @return {Array} Returns array with two indexes if next item was found, 
-	 * <code>null</code> otherwise
-	 */
-	function getRangeForNextItemInCSS(rule, offset, selStart, selEnd) {
-		var tokens = zen_coding.require('parserUtils').parseCSS(rule, offset); 
-		var next = [];
-			
-		/**
-		 * Same range is used inside complex value processor
-		 * @return {Boolean}
-		 */
-		function checkSameRange(r) {
-			return r[0] == selStart && r[1] == selEnd;
-		}
-				
-		// search for token that is right to selection
-		for (var i = 0, il = tokens.length; i < il; i++) {
-			/** @type {syntaxToken} */
-			var token = tokens[i], posTest;
-			if (token.type in knownCSSTypes) {
-				// check token position
-				if (selStart == selEnd)
-					posTest = token.end > selStart;
-				else {
-					posTest = token.start >= selStart;
-					if (token.type == 'value') // respect complex values
-						posTest = posTest || selStart >= token.start && token.end >= selEnd;
-				}
-				
-				if (!posTest) continue;
-				
-				// found token that should be selected
-				if (token.type == 'identifier') {
-					var rule_sel = handleFullRuleCSS(tokens, i, selEnd <= token.end ? token.start : -1);
-					if (rule_sel) return rule_sel;
-					
-				} else if (token.type == 'value' && selEnd > token.start && token.children) {
-					// looks like a complex value
-					var children = token.children;
-					for (var j = 0, jl = children.length; j < jl; j++) {
-						if (children[j][0] >= selStart || (selStart == selEnd && children[j][1] > selStart)) {
-							next = [children[j][0], children[j][1]];
-							if (checkSameRange(next)) {
-								var rule_sel = handleCSSSpecialCase(rule, next[0], next[1], offset);
-								if (!checkSameRange(rule_sel))
-									return rule_sel;
-								else
-									continue;
-							}
-							
-							return next;
-						}
-					}
-				} else if (token.end > selEnd) {
-					return [token.start, token.end];
-				}
-			}
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Returns range for item to be selected in CSS rule before current caret position
-	 * @param {String} rule CSS rule declaration
-	 * @param {Number} offset Rule's position index inside content
-	 * @param {Number} selStart Start index of user selection
-	 * @param {Number} selEnd End index of user selection
-	 * @return {Array} Returns array with two indexes if next item was found, 
-	 * <code>null</code> otherwise
-	 */
-	function getRangeForPrevItemInCSS(rule, offset, selStart, selEnd) {
-		var tokens = zen_coding.require('parserUtils').parseCSS(rule, offset);
-		var next = [];
-				
-		/**
-		 * Same range is used inside complex value processor
-		 * @return {Boolean}
-		 */
-		function checkSameRange(r) {
-			return r[0] == selStart && r[1] == selEnd;
-		}
-			
-		// search for token that is left to the selection
-		for (var i = tokens.length - 1, il = tokens.length; i >= 0; i--) {
-			/** @type {syntaxToken} */
-			var token = tokens[i], pos_test;
-			if (token.type in knownCSSTypes) {
-				// check token position
-				pos_test = token.start < selStart;
-				if (token.type == 'value' && token.ref_start_ix != token.ref_end_ix) // respect complex values
-					pos_test = token.start <= selStart;
-				
-				if (!pos_test) continue;
-				
-				// found token that should be selected
-				if (token.type == 'identifier') {
-					var rule_sel = handleFullRuleCSS(tokens, i, token.start);
-					if (rule_sel) return rule_sel;
-				} else if (token.type == 'value' && token.ref_start_ix != token.ref_end_ix) {
-					// looks like a complex value
-					var children = token.children;
-					for (var j = children.length - 1; j >= 0; j--) {
-						if (children[j][0] < selStart) {
-							// create array copy
-							next = [children[j][0], children[j][1]]; 
-							
-							var rule_sel = handleCSSSpecialCase(rule, next[0], next[1], offset);
-							return !checkSameRange(rule_sel) ? rule_sel : next;
-						}
-					}
-					
-					// if we are here than we already traversed trough all
-					// child tokens, select full value
-					next = [token.start, token.end];
-					if (!checkSameRange(next)) 
-						return next;
-				} else {
-					return [token.start, token.end];
-				}
-			}
-		}
-		
-		return null;
-	}
-	
-	function handleFullRuleCSS(tokens, i, start) {
-		for (var j = i + 1, il = tokens.length; j < il; j++) {
-			/** @type {ParserUtils.token} */
-			var _t = tokens[j];
-			if ((_t.type == 'value' && start == -1) || _t.type == 'identifier') {
-				return [_t.start, _t.end];
-			} else if (_t.type == ';') {
-				return [start == -1 ? _t.start : start, _t.end];
-			} else if (_t.type == '}') {
-				return [start == -1 ? _t.start : start, _t.start - 1];
-			}
-		}
-		
-		return null;
-	}
-	
-	function handleFullAttributeHTML(tokens, i, start) {
-		for (var j = i + 1, il = tokens.length; j < il; j++) {
-			/** @type {ParserUtils.token} */
-			var _t = tokens[j];
-			if (_t.type == 'xml-attribute') {
-				if (start == -1)
-					return handleQuotesHTML(_t.content, [_t.start, _t.end]);
-				else
-					return [start, _t.end];
-			} else if (_t.type == 'xml-attname') {
-				// moved to next attribute, adjust selection
-				return [_t.start, tokens[i].end];
-			}
-		}
-			
-		return null;
-	}
-	
-	function handleQuotesHTML(attr, r) {
-		if (isQuote(attr.charAt(0)))
-			r[0]++;
-		if (isQuote(attr.charAt(attr.length - 1)))
-			r[1]--;
-			
-		return r;
-	}
-	
-	function handleCSSSpecialCase(text, start, end, offset) {
-		text = text.substring(start - offset, end - offset);
-		var m;
-		if (m = text.match(/^[\w\-]+\(['"]?/)) {
-			start += m[0].length;
-			if (m = text.match(/['"]?\)$/))
-				end -= m[0].length;
-		}
-		
-		return [start, end];
-	}
-	
-	// XXX register actions
-	var actions = zen_coding.require('actions');
-	actions.add('select_next_item', function(editor){
-		if (editor.getSyntax() == 'css')
-			return findNextCSSItem(editor);
-		else
-			return findNextHTMLItem(editor);
-	});
-	
-	actions.add('select_previous_item', function(editor){
-		if (editor.getSyntax() == 'css')
-			return findPrevCSSItem(editor);
-		else
-			return findPrevHTMLItem(editor);
-	});
-})();/**
- * Select current line (for simple editors like browser's &lt;textarea&gt;)
- */
-zen_coding.require('actions').add('select_line', function(editor) {
-	var range = editor.getCurrentLineRange();
-	editor.createSelection(range.start, range.end);
-	return true;
-});/**
- * Splits or joins tag, e.g. transforms it into a short notation and vice versa:<br>
- * &lt;div&gt;&lt;/div&gt; → &lt;div /&gt; : join<br>
- * &lt;div /&gt; → &lt;div&gt;&lt;/div&gt; : split
- * @param {IZenEditor} editor Editor instance
- * @param {String} profileName Profile name
- */
-zen_coding.require('actions').add('split_join_tag', function(editor, profileName) {
-	/** @type zen_coding.profile */
-	var profiles = zen_coding.require('profile');
-	var matcher = zen_coding.require('html_matcher');
-	var utils = zen_coding.require('utils');
-	var editorUtils = zen_coding.require('editorUtils');
-	
-	var info = editorUtils.outputInfo(editor, null, profileName);
-	var caretPos = editor.getCaretPos();
-	var profile = profiles.get(info.profile);
-	var caret = utils.getCaretPlaceholder();
-	
-	// find tag at current position
-	var pair = matcher.getTags(info.content, caretPos, info.profile);
-	if (pair && pair[0]) {
-		var newContent = pair[0].full_tag;
-		
-		if (pair[1]) { // join tag
-			var closingSlash = ' /';
-			if (profile.self_closing_tag === true)
-				closingSlash = '/';
-				
-			newContent = newContent.replace(/\s*>$/, closingSlash + '>');
-			
-			// add caret placeholder
-			if (newContent.length + pair[0].start < caretPos)
-				newContent += caret;
-			else {
-				var d = caretPos - pair[0].start;
-				newContent = newContent.substring(0, d) + caret + newContent.substring(d);
-			}
-			
-			editor.replaceContent(newContent, pair[0].start, pair[1].end);
-		} else { // split tag
-			var nl = utils.getNewline();
-			var pad = zen_coding.require('resources').getVariable('indentation');
-			
-			// define tag content depending on profile
-			var tagContent = (profile.tag_nl === true) ? nl + pad + caret + nl : caret;
-					
-			newContent = newContent.replace(/\s*\/>$/, '>') + tagContent + '</' + pair[0].name + '>';
-			editor.replaceContent(newContent, pair[0].start, pair[0].end);
-		}
-		
-		return true;
-	}
-	
-	return false;
-});/**
- * Toggles HTML and CSS comments depending on current caret context
- */
-(function() {
-	var actions = zen_coding.require('actions');
-	var matcher = zen_coding.require('html_matcher');
-	var utils = zen_coding.require('utils');
-	var editorUtils = zen_coding.require('editorUtils');
-	
-	/**
-	 * Toggle comment on current editor's selection or HTML tag/CSS rule
-	 * @param {IZenEditor} editor
-	 */
-	actions.add('toggle_comment', function(editor) {
-		var info = editorUtils.outputInfo(editor);
-		if (info.syntax == 'css') {
-			// in case out editor is good enough and can recognize syntax from 
-			// current token, we have to make sure that cursor is not inside
-			// 'style' attribute of html element
-			var caretPos = editor.getCaretPos();
-			var pair = matcher.getTags(info.content, caretPos);
-			if (pair && pair[0] && pair[0].type == 'tag' && 
-					pair[0].start <= caretPos && pair[0].end >= caretPos) {
-				info.syntax = 'html';
-			}
-		}
-		
-		if (info.syntax == 'css')
-			return toggleCSSComment(editor);
-		
-		return toggleHTMLComment(editor);
-	});
-
-	/**
-	 * Toggle HTML comment on current selection or tag
-	 * @param {zen_editor} editor
-	 * @return {Boolean} Returns <code>true</code> if comment was toggled
-	 */
-	function toggleHTMLComment(editor) {
-		var rng = editor.getSelectionRange();
-		var info = editorUtils.outputInfo(editor);
-			
-		if (rng.start == rng.end) {
-			// no selection, find matching tag
-			var pair = matcher.getTags(info.content, editor.getCaretPos(), info.profile);
-			if (pair && pair[0]) { // found pair
-				rng.start = pair[0].start;
-				rng.end = pair[1] ? pair[1].end : pair[0].end;
-			}
-		}
-		
-		return genericCommentToggle(editor, '<!--', '-->', rng.start, rng.end);
-	}
-
-	/**
-	 * Simple CSS commenting
-	 * @param {zen_editor} editor
-	 * @return {Boolean} Returns <code>true</code> if comment was toggled
-	 */
-	function toggleCSSComment(editor) {
-		var rng = editor.getSelectionRange();
-			
-		if (rng.start == rng.end) {
-			// no selection, get current line
-			rng = editor.getCurrentLineRange();
-
-			// adjust start index till first non-space character
-			var _r = editorUtils.narrowToNonSpace(String(editor.getContent()), rng.start, rng.end);
-			rng.start = _r[0];
-			rng.end = _r[1];
-		}
-		
-		return genericCommentToggle(editor, '/*', '*/', rng.start, rng.end);
-	}
-
-	/**
-	 * Search for nearest comment in <code>str</code>, starting from index <code>from</code>
-	 * @param {String} text Where to search
-	 * @param {Number} from Search start index
-	 * @param {String} start_token Comment start string
-	 * @param {String} end_token Comment end string
-	 * @return {Array|null} Returns null if comment wasn't found
-	 */
-	function searchComment(text, from, start_token, end_token) {
-		var start_ch = start_token.charAt(0);
-		var end_ch = end_token.charAt(0);
-		var commentStart = -1;
-		var commentEnd = -1;
-		
-		function hasMatch(str, start) {
-			return text.substr(start, str.length) == str;
-		}
-			
-		// search for comment start
-		while (from--) {
-			if (text.charAt(from) == start_ch && hasMatch(start_token, from)) {
-				commentStart = from;
-				break;
-			}
-		}
-		
-		if (commentStart != -1) {
-			// search for comment end
-			from = commentStart;
-			var contentLen = text.length;
-			while (contentLen >= from++) {
-				if (text.charAt(from) == end_ch && hasMatch(end_token, from)) {
-					commentEnd = from + end_token.length;
-					break;
-				}
-			}
-		}
-		
-		return (commentStart != -1 && commentEnd != -1) 
-			? [commentStart, commentEnd] 
-			: null;
-	}
-
-	/**
-	 * Generic comment toggling routine
-	 * @param {zen_editor} editor
-	 * @param {String} commentStart Comment start token
-	 * @param {String} commentEnd Comment end token
-	 * @param {Number} rangeStart Start selection range
-	 * @param {Number} rangeEnd End selection range
-	 * @return {Boolean}
-	 */
-	function genericCommentToggle(editor, commentStart, commentEnd, rangeStart, rangeEnd) {
-		var content = String(editor.getContent());
-		var caretPos = editor.getCaretPos();
-		var newContent = null;
-			
-		/**
-		 * Remove comment markers from string
-		 * @param {Sting} str
-		 * @return {String}
-		 */
-		function removeComment(str) {
-			return str
-				.replace(new RegExp('^' + utils.escapeForRegexp(commentStart) + '\\s*'), function(str){
-					caretPos -= str.length;
-					return '';
-				}).replace(new RegExp('\\s*' + utils.escapeForRegexp(commentEnd) + '$'), '');
-		}
-		
-		function hasMatch(str, start) {
-			return content.substr(start, str.length) == str;
-		}
-			
-		// first, we need to make sure that this substring is not inside 
-		// comment
-		var commentRange = searchComment(content, caretPos, commentStart, commentEnd);
-		
-		if (commentRange && commentRange[0] <= rangeStart && commentRange[1] >= rangeEnd) {
-			// we're inside comment, remove it
-			rangeStart = commentRange[0];
-			rangeEnd = commentRange[1];
-			
-			newContent = removeComment(content.substring(rangeStart, rangeEnd));
-		} else {
-			// should add comment
-			// make sure that there's no comment inside selection
-			newContent = commentStart + ' ' + 
-				content.substring(rangeStart, rangeEnd)
-					.replace(new RegExp(utils.escapeForRegexp(commentStart) + '\\s*|\\s*' + utils.escapeForRegexp(commentEnd), 'g'), '') +
-				' ' + commentEnd;
-				
-			// adjust caret position
-			caretPos += commentStart.length + 1;
-		}
-
-		// replace editor content
-		if (newContent !== null) {
-			editor.setCaretPos(rangeStart);
-			editor.replaceContent(editorUtils.unindent(editor, newContent), rangeStart, rangeEnd);
-			editor.setCaretPos(caretPos);
-			return true;
-		}
-		
-		return false;
-	}
-})();/**
- * Automatically updates image size attributes in HTML's &lt;img&gt; element or
- * CSS rule
- * @constructor
- * @memberOf __zenUpdateImageSizeAction
- */
-(function() {
-	zen_coding.require('actions').add('update_image_size', function(editor) {
-		var result;
-		if (String(editor.getSyntax()) == 'css') {
-			result = updateImageSizeCSS(editor);
-		} else {
-			result = updateImageSizeHTML(editor);
-		}
-		
-		return zen_coding.require('actionUtils').compoundUpdate(editor, result);
-	});
-	
-	/**
-	 * Updates image size of &lt;img src=""&gt; tag
-	 * @param {IZenEditor} editor
-	 */
-	function updateImageSizeHTML(editor) {
-		var offset = editor.getCaretPos();
-		/** @type zen_coding.actionUtils */
-		var actionUtils = zen_coding.require('actionUtils');
-			
-		var image = findImage(editor);
-		if (image) {
-			var re = /\bsrc=(["'])(.+?)\1/i, m, src;
-			if (m = re.exec(image.tag))
-				src = m[2];
-			
-			if (src) {
-				var size = getImageSizeForSource(editor, src);
-				if (size) {
-					var newTag = actionUtils.replaceOrAppendHTMLAttribute(image.tag, 'width', size.width);
-					newTag = actionUtils.replaceOrAppendHTMLAttribute(newTag, 'height', size.height);
-					
-					return {
-						'data': newTag,
-						'start': image.start,
-						'end': image.end,
-						'caret': offset
-					};
-				}
-			}
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Find image tag under caret
-	 * @param {IZenEditor} editor
-	 * @return Image tag and its indexes inside editor source
-	 */
-	function findImage(editor) {
-		var caretPos = editor.getCaretPos();
-		var content = String(editor.getContent());
-		var contentLen = content.length;
-		var startIx = -1;
-		var endIx = -1;
-		
-		// find the beginning of the tag
-		do {
-			if (caretPos < 0)
-				break;
-			if (content.charAt(caretPos) == '<') {
-				if (content.substring(caretPos, caretPos + 4).toLowerCase() == '<img') {
-					// found the beginning of the image tag
-					startIx = caretPos;
-					break;
-				} else {
-					// found some other tag
-					return null;
-				}
-			}
-		} while(caretPos--);
-		
-		// find the end of the tag 
-		caretPos = editor.getCaretPos();
-		do {
-			if (caretPos >= contentLen)
-				break;
-				
-			if (content.charAt(caretPos) == '>') {
-				endIx = caretPos + 1;
-				break;
-			}
-		} while(caretPos++);
-		
-		if (startIx != -1 && endIx != -1)
-			
-			return {
-				start: startIx,
-				end: endIx,
-				tag: content.substring(startIx, endIx)
-			};
-		
-		return null;
-	}
-	
-	/**
-	 * Returns image dimensions for source
-	 * @param {IZenEditor} editor
-	 * @param {String} src Image source (path or data:url)
-	 */
-	function getImageSizeForSource(editor, src) {
-		var fileContent;
-		var file = zen_coding.require('file');
-		if (src) {
-			// check if it is data:url
-			if (startsWith('data:', src)) {
-				fileContent = zen_coding.require('base64').decode( src.replace(/^data\:.+?;.+?,/, '') );
-			} else {
-				var abs_path = file.locateFile(editor.getFilePath(), src);
-				if (abs_path === null) {
-					throw "Can't find " + src + ' file';
-				}
-				
-				fileContent = String(file.read(abs_path));
-			}
-			
-			return zen_coding.require('actionUtils').getImageSize(fileContent);
-		}
-	}
-	
-	/**
-	 * Test if <code>text</code> starts with <code>token</code> at <code>pos</code>
-	 * position. If <code>pos</code> is ommited, search from beginning of text 
-	 * @param {String} token Token to test
-	 * @param {String} text Where to search
-	 * @param {Number} pos Position where to start search
-	 * @return {Boolean}
-	 * @since 0.65
-	 */
-	function startsWith(token, text, pos) {
-		pos = pos || 0;
-		return text.charAt(pos) == token.charAt(0) && text.substr(pos, token.length) == token;
-	}
-	
-	/**
-	 * Replace substring of <code>text</code>, defined by <code>start</code> and 
-	 * <code>end</code> indexes with <code>new_value</code>
-	 * @param {String} text
-	 * @param {Number} start
-	 * @param {Number} end
-	 * @param {String} new_value
-	 * @return {String}
-	 */
-	function replaceSubstring(text, start, end, new_value) {
-		return text.substring(0, start) + new_value + text.substring(end);
-	}
-	
-	/**
-	 * Updates image size of CSS rule
-	 * @param {IZenEditor} editor
-	 */
-	function updateImageSizeCSS(editor) {
-		var parserUtils = zen_coding.require('parserUtils');
-		
-		var caretPos = editor.getCaretPos();
-		var content = String(editor.getContent());
-		var rule = parserUtils.extractCSSRule(content, caretPos, true);
-			
-		
-		if (rule) {
-			var css = parserUtils.parseCSS(content.substring(rule[0], rule[1]), rule[0]);
-			var curToken = parserUtils.findTokenFromPosition(css, caretPos, 'identifier');
-			var value = parserUtils.findValueToken(css, curToken + 1);
-				
-			if (!value) return false;
-			
-			// find insertion point
-			var insPoint = parserUtils.findCSSInsertionPoint(css, curToken);
-				
-			var m;
-			if (m = /url\((["']?)(.+?)\1\)/i.exec(value.content)) {
-				var size = getImageSizeForSource(editor, m[2]);
-				if (size) {
-					var wh = {width: null, height: null};
-					var updates = [];
-					var styler = parserUtils.learnCSSStyle(css, curToken);
-						
-					for (var i = 0, il = css.length; i < il; i++) {
-						if (css[i].type == 'identifier' && css[i].content in wh)
-							wh[css[i].content] = i;
-					}
-					
-					function update(name, val) {
-						var v;
-						if (wh[name] !== null && (v = parserUtils.findValueToken(css, wh[name] + 1))) {
-							updates.push([v.start, v.end, val + 'px']);
-						} else {
-							updates.push([insPoint.token.end, insPoint.token.end, styler(name, val + 'px')]);
-						}
-					}
-					
-					update('width', size.width);
-					update('height', size.height);
-					
-					if (updates.length) {
-						updates.sort(function(a, b){return a[0] - b[0];});
-						
-						// some editors do not provide easy way to replace multiple code 
-						// fragments so we have to squash all replace operations into one
-						var data = content.substring(updates[0][0], updates[updates.length - 1][1]),
-							offset = updates[0][0];
-							
-						for (var i = updates.length - 1; i >= 0; i--) {
-							var u = updates[i];
-							data = replaceSubstring(data, u[0] - offset, u[1] - offset, u[2]);
-								
-							// also calculate new caret position
-							if (u[0] < caretPos)
-								caretPos += u[2].length - u[1] + u[0];
-						}
-						
-						if (insPoint.need_col)
-							data = replaceSubstring(data, insPoint.token.end - offset, insPoint.token.end - offset, ';');
-						
-						return {
-							'data': data,
-							'start': offset,
-							'end': updates[updates.length - 1][1],
-							'caret': caretPos
-						};
-						
-					}
-				}
-			}
-		}
-			
-		return false;
-	}
-})();/**
- * 
- */
-(function() {
-	
-	/**
-	 * Wraps passed text with abbreviation. Text will be placed inside last
-	 * expanded element
-	 * @param {String} abbr Abbreviation
-	 * @param {String} text Text to wrap
-	 * @param {String} syntax Document type (html, xml, etc.). Default is 'html'
-	 * @param {String} profile Output profile's name. Default is 'plain'
-	 * @return {String}
-	 */
-	function wrap(abbr, text, syntax, profile) {
-		/** @type zen_coding.filters */
-		var filters = zen_coding.require('filters');
-		/** @type zen_coding.utils */
-		var utils = zen_coding.require('utils');
-		/** @type zen_coding.transform */
-		var transform = zen_coding.require('transform');
-		
-		var pasted = false;
-		
-//		try {
-			var data = filters.extractFromAbbreviation(abbr);
-			var parsedTree = transform.createParsedTree(data[0], syntax);
-			if (parsedTree) {
-				if (parsedTree.multiply_elem) {
-					// we have a repeating element, put content in
-					parsedTree.multiply_elem.setPasteContent(text);
-					parsedTree.multiply_elem.repeat_by_lines = pasted = true;
-				}
-				
-				var outputTree = transform.rolloutTree(parsedTree);
-				if (!pasted) 
-					outputTree.pasteContent(text);
-				
-				var filtersList = filters.composeList(syntax, profile, data[1]);
-				filters.apply(outputTree, filtersList, profile);
-				return utils.replaceVariables(outputTree.toString());
-			}
-//		} catch(e) {
-//			zen_coding.log(e);
-//		}
-		
-		return null;
-	}
-	
-	/**
-	 * Wraps content with abbreviation
-	 * @param {IZenEditor} Editor instance
-	 * @param {String} abbr Abbreviation to wrap with
-	 * @param {String} syntax Syntax type (html, css, etc.)
-	 * @param {String} profile Output profile name (html, xml, xhtml)
-	 */
-	function wrapWithAbbreviaton(editor, abbr, syntax, profile) {
-		var info = zen_coding.require('editorUtils').outputInfo(editor, syntax, profile);
-		var utils = zen_coding.require('utils');
-		/** @type zen_coding.editorUtils */
-		var editorUtils = zen_coding.require('editorUtils');
-		var matcher = zen_coding.require('html_matcher');
-		
-		abbr = abbr || editor.prompt("Enter abbreviation");
-		
-		var range = editor.getSelectionRange();
-		var startOffset = range.start;
-		var endOffset = range.end;
-			
-		if (!abbr || typeof abbr == 'undefined')
-			return null; 
-			
-		abbr = String(abbr);
-		
-		if (startOffset == endOffset) {
-			// no selection, find tag pair
-			range = matcher(info.content, startOffset, info.profile);
-			
-			if (!range || range[0] == -1) // nothing to wrap
-				return false;
-			
-			var narrowedSel = editorUtils.narrowToNonSpace(info.content, range[0], range[1]);
-			startOffset = narrowedSel[0];
-			endOffset = narrowedSel[1];
-		}
-		
-		var newContent = utils.escapeText(info.content.substring(startOffset, endOffset));
-		var result = wrap(abbr, editorUtils.unindent(editor, newContent), info.syntax, info.profile);
-		
-		if (result) {
-			editor.setCaretPos(endOffset);
-			editor.replaceContent(result, startOffset, endOffset);
-			return true;
-		}
-		
-		return false;
-	}
-	
-	// add back-reference to "wrap" utility function for use in external modules
-	wrapWithAbbreviaton.wrap = wrap;
-	
-	zen_coding.require('actions').add('wrap_with_abbreviation', wrapWithAbbreviaton);
-})();/**
- * Updates CSS abbreviations like 'd:n!' with <i>!important</i> modifier.
- * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- * @param {Array} match Regexp match object
- * @param {TreeNode} node Matched abbreviation node
- * @param {String} syntax Current syntax
- */
-zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, syntax) {
-	if (syntax != 'css')
-		return null;
-	
-	var res = zen_coding.require('resources');
-	var elems = zen_coding.require('elements');
-	
-	// generate parsed snippet
-	var source = res.getSnippet(syntax, match[1]);
-	if (source) {
-		var parsedSnippet = elems.create('parsedSnippet', node, syntax, source);
-		if (~parsedSnippet.value.indexOf(';')) {
-			parsedSnippet.value = parsedSnippet.value.split(';').join(' !important;');
-		} else {
-			parsedSnippet.value += ' !important';
-		}
-		
-		return parsedSnippet;
-	}
-	
-	return null;
-});
-/**
- * "Lorem ipsum" text generator. Matches lipsum(num)(elem_name) abbreviation.
+ * "Lorem ipsum" text generator. Matches <code>lipsum(num)?</code> or 
+ * <code>lorem(num)?</code> abbreviation.
  * This code is based on Django's contribution: 
  * https://code.djangoproject.com/browser/django/trunk/django/contrib/webdesign/lorem_ipsum.py
  * <br><br>
@@ -9480,28 +11394,27 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
  * <code>lipsum*6</code> – generates 6 paragraphs (autowrapped with &lt;p&gt; element) of text.<br>
  * <code>ol>lipsum10*5</code> — generates ordered list with 5 list items (autowrapped with &lt;li&gt; tag)
  * with text of 10 words on each line<br>
- * <code>lipsum20span*3</code> – generates 3 paragraphs of 20-words text, each wrapped with &lt;span&gt; element    
+ * <code>span*3>lipsum20</code> – generates 3 paragraphs of 20-words text, each wrapped with &lt;span&gt; element .
+ * Each paragraph phrase is unique   
+ * @param {Function} require
+ * @param {Underscore} _ 
+ * @constructor
+ * @memberOf __loremIpsumGeneratorDefine
  */
-(function() {
+zen_coding.exec(function(require, _) {
 	/**
 	 * @param {Array} match
 	 * @param {TreeNode} node
 	 * @param {String} syntax
 	 */
-	zen_coding.require('resources').addGenerator(/^lipsum(\d*)([a-z]*)$/i, function(match, node, syntax) {
+	require('resources').addGenerator(/^(?:lorem|lipsum)(\d*)$/i, function(match, node, syntax) {
 		var wordCound = match[1] || 30;
-		var elemName = match[2] || '';
+		var elemName = '';
 		var outputCount = node.count || 1;
 		
 		if (!elemName && node.parent.name) {
 			// guess element name from TreeNode
-			switch (node.parent.name.toLowerCase()) {
-				case 'ul':
-				case 'ol':
-					elemName = 'li';
-					break;
-				// TODO add more auto names 
-			}
+			elemName = require('tagName').getMapping(node.parent.name);
 		}
 		
 		// if output tag name is undefined and user wants to output more than one
@@ -9510,20 +11423,28 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 			elemName = 'p';
 		}
 		
-		var result = [], text;
-		/** @type zen_coding.transform */
-		var transform = zen_coding.require('transform');
-		while (outputCount-- > 0) {
-			// to automatically handle element references from zen_setting
-			// (and because I'm lazy) we will generate a new abbreviation and
-			// let Zen Coding correctly expand it
-			text = elemName + '{' + paragraph(wordCound, result.length == 0) + '}';
-			result.push(transform.createParsedTree(text, syntax, node.parent).children[0]);
-		}
+		var elem = require('elements').create('parsedElement', node, syntax, elemName);
+		// override 'getContent()' method so it will output lorem ipsum dynamically,
+		// when tree will be rolled out
+		elem._content = function(el) {
+			var isStarted = !!el.options.loremStarted;
+			el.options.loremStarted = true;
+			return paragraph(wordCound, !isStarted);
+		};
 		
-		return result;
+		return elem;
 	});
 	
+	/**
+	 * Find root element
+	 * @param {TreeNode} node
+	 * @returns {TreeNode}
+	 */
+	function findRoot(node) {
+		while (node.parent)
+			node = node.parent;
+		return node;
+	}
 	
 	var COMMON_P = 'lorem ipsum dolor sit amet consectetur adipisicing elit'.split(' ');
 	
@@ -9573,9 +11494,6 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 	 * @returns {Array}
 	 */
 	function sample(arr, count) {
-		/** @type Underscore */
-		var _ = zen_coding.require('_');
-		
 		var len = arr.length;
 		var iterations = Math.min(len, count);
 		var result = [];
@@ -9591,7 +11509,6 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 	}
 	
 	function choice(val) {
-		var _ = zen_coding.require('_');
 		if (_.isString(val))
 			return val.charAt(randint(0, val.length - 1));
 		
@@ -9614,8 +11531,6 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 	function insertCommas(words) {
 		var len = words.length;
 		var totalCommas = 0;
-		/** @type Underscore */
-		var _ = zen_coding.require('_');
 		
 		if (len > 3 && len <= 6) {
 			totalCommas = randint(0, 1);
@@ -9643,7 +11558,7 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 		var words;
 		
 		if (startWithCommon) {
-			words = COMMON_P.slice(0, wordCount);
+			words = COMMON_P.slice(0, wordCount + 1);
 			if (words.length > 5)
 				words[4] += ',';
 			totalWords += words.length;
@@ -9659,275 +11574,4 @@ zen_coding.require('resources').addGenerator(/^(.+)\!$/, function(match, node, s
 		
 		return result.join(' ');
 	}
-})();/**
- * Short-hand functions for Java wrapper
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
- * 
- * @include "../../javascript/zen_resources.js"
- */
-
-/**
- * Runs Zen Coding action
- * @param {ZenEditor} editor
- * @param {String} action_name
- * @return {Boolean}
- */function runZenCodingAction(editor, action_name){
-	var args = [editor];
-	for (var i = 2, il = arguments.length; i < il; i++) {
-		args.push(arguments[i]);
-	}
-	
-	return zen_coding.require('actions').run(action_name, args);
-}
-
-/**
- * Removes all user defined settings
- */
-function resetUserSettings() {
-	zen_coding.require('resources').setVocabulary({}, 'user');
-}
-
-/**
- * Adds user defined resource (abbreviation or snippet)
- * @param {String} syntax
- * @param {String} type
- * @param {String} abbr
- * @param {String} value
- */
-function addUserResource(syntax, type, abbr, value) {
-	var res = zen_coding.require('resources');
-	var voc = res.getVocabulary('user') || {};
-	if (!(syntax in voc))
-		voc[syntax] = {};
-		
-	if (!(type in voc[syntax]))
-		voc[syntax][type] = {};
-		
-	voc[syntax][type][abbr] = value;
-	
-	res.setVocabulary(voc, 'user');
-}
-
-function hasZenCodingVariable(name) {
-	return !!zen_coding.require('resources').getVariable(name);
-}
-
-function tryBoolean(val) {
-	var str_val = String(val || '').toLowerCase();
-	if (str_val == 'true')
-		return true;
-	if (str_val == 'false')
-		return false;
-		
-	var int_val = parseInt(str_val, 10);
-	if (!isNaN(int_val))
-		return int_val;
-	
-	return str_val;
-}
-
-function setupOutputProfile(name, profile_obj, editor) {
-	var map = {
-		tag_case: 'getTagCase',
-		attr_case: 'getAttrCase',
-		attr_quotes: 'getAttrQuotes',
-		tag_nl: 'getTagNewline',
-		place_cursor: 'isPlaceCaret',
-		indent: 'isIndentTags',
-		inline_break: 'getInlineBreak',
-		self_closing_tag: 'getSelfClosing',
-		filters: 'getFilters'
-	};
-	
-	name = String(name);
-	
-	var profile = {};
-		
-	for (var p in map) if (map.hasOwnProperty(p)) {
-		profile[p] = tryBoolean(profile_obj[map[p]]());
-	}
-	
-	zen_coding.require('profile').create(name, profile);
-}
-
-function addUserVariable(name, value) {
-	zen_coding.require('resources').setVariable(name, value);
-}
-
-function previewWrapWithAbbreviation(editor, abbr) {
-	var syntax = String(editor.getSyntax());
-	var profileName = String(editor.getProfileName());
-	abbr = String(abbr);
-	
-	var range = editor.getSelectionRange(),
-		startOffset = range.start,
-		endOffset = range.end,
-		content = String(editor.getContent());
-		
-		
-	if (!abbr)
-		return null;
-	
-	var editorUtils = zen_coding.require('editorUtils');
-	var utils = zen_coding.require('utils');
-	
-	if (startOffset == endOffset) {
-		// no selection, find tag pair
-		range = zen_coding.require('html_matcher')(content, startOffset, profileName);
-		
-		if (!range || range[0] == -1) // nothing to wrap
-			return null;
-		
-		var narrowedSel = editorUtils.narrowToNonSpace(content, range[0], range[1]);
-		startOffset = narrowedSel[0];
-		endOffset = narrowedSel[1];
-	}
-	
-	var wrapAction = zen_coding.require('actions').get('wrap_with_abbreviation');
-	var result = null;
-	if (wrapAction) {
-		
-		var newContent = utils.escapeText(content.substring(startOffset, endOffset));
-		result = wrapAction.fn.wrap(abbr, editorUtils.unindent(editor, newContent), syntax, profileName);
-	}
-	
-	return result || null;
-}
-/**
- * Zen Coding file I/O interface implementation using Java classes 
- * (for Mozilla Rhino)
- *
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
- * @version 0.65
- */
-zen_coding.define('file', function(require, _) {
-	return {
-		/**
-		 * Read file content and return it
-		 * @param {String} path File's relative or absolute path
-		 * @return {String}
-		 * @memberOf __zenFileJava
-		 */
-		read: function(path) {
-			var File = Packages.java.io.File;
-			var f = new File(path),
-				input_stream, c, content = [];
-				
-			if (f.exists() && f.isFile() && f.canRead()) {
-				input_stream = new Packages.java.io.FileInputStream(f);
-				while ((c = input_stream.read()) != -1) {
-					content.push(String.fromCharCode(c));
-				}
-				
-				input_stream.close();
-			}
-
-			return content.join('');
-		},
-
-		/**
-		 * Locate <code>file_name</code> file that relates to <code>editor_file</code>.
-		 * File name may be absolute or relative path
-		 *
-		 * <b>Dealing with absolute path.</b>
-		 * Many modern editors has a "project" support as information unit, but you
-		 * should not rely on project path to find file with absolute path. First,
-		 * it requires user to create a project before using this method (and this
-		 * is not acutually Zen). Second, project path doesn't always points to
-		 * to website's document root folder: it may point, for example, to an
-		 * upper folder which contains server-side scripts.
-		 *
-		 * For better result, you should use the following algorithm in locating
-		 * absolute resources:
-		 * 1) Get parent folder for <code>editor_file</code> as a start point
-		 * 2) Append required <code>file_name</code> to start point and test if
-		 * file exists
-		 * 3) If it doesn't exists, move start point one level up (to parent folder)
-		 * and repeat step 2.
-		 *
-		 * @param {String} editor_file
-		 * @param {String} file_name
-		 * @return {String|null} Returns null if <code>file_name</code> cannot be located
-		 */
-		locateFile: function(editor_file, file_name) {
-			var File = Packages.java.io.File;
-			var f = new File(editor_file),
-				result = '',
-				tmp;
-				
-			// traverse upwards to find image uri
-			while (f.getParent()) {
-				tmp = new File(this.createPath(f.getParent(), file_name));
-				if (tmp.exists()) {
-					result = tmp.getCanonicalPath();
-					break;
-				}
-				
-				f = new File(f.getParent());
-			}
-			
-			return result;
-		},
-
-		/**
-		 * Creates absolute path by concatenating <code>parent</code> and <code>file_name</code>.
-		 * If <code>parent</code> points to file, its parent directory is used
-		 * @param {String} parent
-		 * @param {String} file_name
-		 * @return {String}
-		 */
-		createPath: function(parent, file_name) {
-			var File = Packages.java.io.File,
-				f = new File(parent),
-				result = '';
-				
-			if (f.exists()) {
-				if (f.isFile()) {
-					parent = f.getParent();
-				}
-				
-				var req_file = new File(parent, file_name);
-				result = req_file.getCanonicalPath();
-			}
-			
-			return result;
-		},
-
-		/**
-		 * Saves <code>content</code> as <code>file</code>
-		 * @param {String} file File's asolute path
-		 * @param {String} content File content
-		 */
-		save: function(file, content) {
-			content = content || '';
-			file = String(file);
-			
-			var File = Packages.java.io.File,
-				f = new File(file);
-				
-			if (file.indexOf('/') != -1) {
-				var f_parent = new File(f.getParent());
-				f_parent.mkdirs();
-			}
-			
-			var stream = new Packages.java.io.FileOutputStream(file);
-			for (var i = 0, il = content.length; i < il; i++) {
-				stream.write(content.charCodeAt(i));
-			}
-				
-			stream.close();
-		},
-
-		/**
-		 * Returns file extention in lower case
-		 * @param {String} file
-		 * @return {String}
-		 */
-		getExt: function(file) {
-			var m = (file || '').match(/\.([\w\-]+)$/);
-			return m ? m[1].toLowerCase() : '';
-		}
-	};
 });

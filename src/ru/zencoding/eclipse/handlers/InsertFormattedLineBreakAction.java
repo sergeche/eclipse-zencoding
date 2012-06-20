@@ -17,7 +17,7 @@ public class InsertFormattedLineBreakAction {
 		
 		if (editor != null && shouldHandle(editor)) {
 			try {
-				Boolean result = JSExecutor.getSingleton().runAction(editor, new Object[]{"insert_formatted_line_break_only"});
+				Boolean result = JSExecutor.getSingleton().runAction(editor, "insert_formatted_line_break_only");
 				if (!result) {
 					String curPadding = editor.getCurrentLinePadding();
 					String content = editor.getContent();

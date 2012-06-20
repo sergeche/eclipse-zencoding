@@ -5,19 +5,16 @@ import java.io.FileInputStream;
 import java.io.FilenameFilter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.Reader;
 
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.text.templates.Template;
 import org.eclipse.jface.text.templates.persistence.TemplateStore;
 import org.mozilla.javascript.Context;
-import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 
 import ru.zencoding.eclipse.EclipseTemplateProcessor;
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
-import ru.zencoding.eclipse.EclipseZenFile;
 import ru.zencoding.eclipse.preferences.PreferenceConstants;
 import ru.zencoding.eclipse.preferences.TemplateHelper;
 import ru.zencoding.eclipse.preferences.output.OutputProfile;
@@ -27,15 +24,13 @@ public class JSExecutor {
 	private static Context cx;
 	private static Scriptable scope;
 	private static boolean inited = false; 
-	private static String fileName = "zencoding.js";
+	private static String snippetsJSON = "snippets.json";
 	
-	private Function runActionFn;
-	private Function resetVarsFn;
-	private Function addResourceFn;
-	private Function hasVariableFn;
-	private Function setupProfileFn;
-	private Function addVariableFn;
-	private Function previewWrapFn;
+	private static String[] coreFiles = {
+		"zencoding.js", 
+		"file-interface.js",
+		"java-wrapper.js"
+	}; 
 	
 	protected static class NotAFunctionException extends Exception {
 		private static final long serialVersionUID = -1259543361680422950L;
@@ -45,21 +40,20 @@ public class JSExecutor {
 		inited = false;
 		cx = Context.enter();
 		scope = cx.initStandardObjects();
-		Reader input = getJSInput();
-		if (input != null) {
-			try {
-				cx.evaluateReader(scope, input, getFilename(), 1, null);
-				Object zenFile = Context.javaToJS(new EclipseZenFile(), scope);
-				ScriptableObject.putProperty(scope, "zen_file", zenFile);
-				loadExtensions(cx, scope);
-				inited = cacheRefs();
-			} catch (Exception e) {
-				System.err.println(e.getMessage());
+		try {
+			// load core
+			for (int i = 0; i < coreFiles.length; i++) {
+				cx.evaluateReader(scope, getReaderForLocalFile(coreFiles[i]), coreFiles[i], 1, null);
 			}
-		} else {
-			System.err.println("Can't get reader");
+			
+			// load snippets
+			execJSFunction("javaLoadSystemSnippets", readLocalFile(snippetsJSON));
+			
+			loadExtensions(cx, scope);
+			inited = true;
+		} catch (Exception e) {
+			System.err.println(e.getMessage());
 		}
-		
 	}
 
 	public static JSExecutor getSingleton() {
@@ -84,76 +78,68 @@ public class JSExecutor {
 		singleton = null;
 	}
 	
-	private String getFilename() {
-		return fileName;
-	}
-	
-	private Reader getJSInput() {
-		InputStream is = this.getClass().getResourceAsStream(this.getFilename());
+	private InputStreamReader getReaderForLocalFile(String fileName) {
+		InputStream is = this.getClass().getResourceAsStream(fileName);
 		return new InputStreamReader(is);
 	}
 	
-	/**
-	 * Caches references to JavaScript functions
-	 * @return
-	 * @throws NotAFunctionException 
-	 */
-	private boolean cacheRefs() throws NotAFunctionException {
-		runActionFn = getFunction("runZenCodingAction");
-		resetVarsFn = getFunction("resetUserSettings");
-		addResourceFn = getFunction("addUserResource");
-		hasVariableFn = getFunction("hasZenCodingVariable");
-		setupProfileFn = getFunction("setupOutputProfile");
-		addVariableFn = getFunction("addUserVariable");
-		previewWrapFn = getFunction("previewWrapWithAbbreviation");
-		
-		return true;
+	private String readLocalFile(String fileName) {
+		// using Scanner trick:
+		// http://stackoverflow.com/a/5445161/1312205
+		InputStream is = this.getClass().getResourceAsStream(fileName);
+		try {
+	        return new java.util.Scanner(is).useDelimiter("\\A").next();
+	    } catch (java.util.NoSuchElementException e) {
+	        return "";
+	    }
 	}
-	
-	private Function getFunction(String name) throws NotAFunctionException {
-		Object fnObj = scope.get(name, scope);
-		if (fnObj instanceof Function) 
-			return (Function) fnObj;
-		else 
-			throw new NotAFunctionException();
-	}
-	
-
 	
 	public boolean isInited() {
 		return inited;
 	}
 	
 	/**
-	 * Runs Zen Coding script on passed editor object
-	 * @return 'True' if action was successfully executed
+	 * Executes arbitrary JS function with passed arguments. Each argument is
+	 * automatically converted to JS type
+	 * @param name JS function name. May have namespaces 
+	 * (e.g. <code>zen_coding.require('actions').get</code>)
+	 * @param vargs
+	 * @return
 	 */
-	public boolean runAction(IZenEditor editor, String actionName) {
-		return runAction(editor, new Object[] {actionName});
+	public Object execJSFunction(String name, Object... vargs) {
+		// temporary register all variables
+		Object wrappedObj;
+		StringBuilder jsArgs = new StringBuilder();
+		for (int i = 0; i < vargs.length; i++) {
+			wrappedObj = Context.javaToJS(vargs[i], scope);
+			ScriptableObject.putProperty(scope, "__javaParam" + i, wrappedObj);
+			if (i > 0) {
+				jsArgs.append(',');
+			}
+			jsArgs.append("__javaParam" + i);
+		}
+		
+		// evaluate code
+		Object result = cx.evaluateString(scope, name + "(" + jsArgs.toString() + ");", "<eval>", 1, null);
+		
+		// remove temp variables
+		for (int i = 0; i < vargs.length; i++) {
+			ScriptableObject.deleteProperty(scope, "__javaParam" + i);
+		}
+		
+		return result;
 	}
 	
 	/**
-	 * Runs Zen Coding script on passed editor object
+	 * Runs Zen Coding script on passed editor object (should be the first argument)
 	 * @return 'True' if action was successfully executed
 	 */
-	public boolean runAction(IZenEditor editor, Object[] args) {
+	public boolean runAction(Object... args) {
 		if (isInited()) {
-			Object fnArgs[] = new Object[args.length + 1];
-			fnArgs[0] = convertJavaToJs(editor);
-			
-			for (int i = 0; i < args.length; i++) {
-				fnArgs[i + 1] = args[i];
-			}
-			
-			Object result = runActionFn.call(cx, scope, scope, fnArgs);
-			return Context.toBoolean(result);
+			return Context.toBoolean(execJSFunction("runZenCodingAction", args));
 		}
 		
 		return false;
-	}
-	
-	public Object convertJavaToJs(Object arg) {
-		return Context.javaToJS(arg, scope);
 	}
 	
 	/**
@@ -162,7 +148,7 @@ public class JSExecutor {
 	 */
 	public void reloadUserSettings() {
 		if (isInited()) {
-			resetVarsFn.call(cx, scope, scope, null);
+			execJSFunction("resetUserSettings");
 			saveSettings("abbreviations");
 			saveSettings("snippets");
 			saveVariables();
@@ -175,9 +161,9 @@ public class JSExecutor {
 		for (Template template : templates) {
 			String ctxId = template.getContextTypeId();
 			String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
-			Object fnArgs[] = {syntax, type, template.getName(),
-					EclipseTemplateProcessor.process(template.getPattern())};
-			addResourceFn.call(cx, scope, scope, fnArgs);
+			
+			execJSFunction("addUserResource", syntax, type, template.getName(),
+					EclipseTemplateProcessor.process(template.getPattern()));
 		}
 	}
 	
@@ -185,13 +171,13 @@ public class JSExecutor {
 		TemplateStore storage = TemplateHelper.getVariableStore();
 		Template[] templates = storage.getTemplates();
 		for (Template template : templates) {
-			Object fnArgs[] = {template.getName(), EclipseTemplateProcessor.process(template.getPattern())};
-			addVariableFn.call(cx, scope, scope, fnArgs);
+			execJSFunction("addUserVariable", template.getName(), 
+					EclipseTemplateProcessor.process(template.getPattern()));
 		}
 	}
 	
 	public void setupProfile(String name, OutputProfile profile) {
-		setupProfileFn.call(cx, scope, scope, new Object[] {name, convertJavaToJs(profile)});
+		execJSFunction("setupOutputProfile", name, profile);
 	}
 	
 	/**
@@ -201,12 +187,10 @@ public class JSExecutor {
 	 */
 	public boolean hasVariable(String name) {
 		if (isInited()) {
-			Object fnArgs[] = {name};
-			Object result = hasVariableFn.call(cx, scope, scope, fnArgs);
-			return Context.toBoolean(result);
-		} else {
-			return false;
+			return Context.toBoolean(execJSFunction("hasZenCodingVariable", name));
 		}
+		
+		return false;
 	}
 	
 	/**
@@ -214,9 +198,7 @@ public class JSExecutor {
 	 */
 	public String getWrapPreview(IZenEditor editor, String abbr) {
 		if (isInited()) {
-			Object result = previewWrapFn.call(cx, scope, scope, 
-					new Object[]{convertJavaToJs(editor), abbr});
-			return Context.toString(result);
+			return Context.toString(execJSFunction("previewWrapWithAbbreviation", editor, abbr));
 		}
 		
 		return null;
