@@ -32,10 +32,6 @@ public class JSExecutor {
 		"java-wrapper.js"
 	}; 
 	
-	protected static class NotAFunctionException extends Exception {
-		private static final long serialVersionUID = -1259543361680422950L;
-	}
-
 	private JSExecutor() {
 		inited = false;
 		cx = Context.enter();
