@@ -4134,7 +4134,9 @@ zen_coding.define('tabStops', function(require, _) {
  */
 zen_coding.define('preferences', function(require, _) {
 	var preferences = {};
-	var _dbg = null;
+	var defaults = {};
+	var _dbgDefaults = null;
+	var _dbgPreferences = null;
 	
 	function isValueObj(obj) {
 		return _.isObject(obj) 
@@ -4144,14 +4146,14 @@ zen_coding.define('preferences', function(require, _) {
 	
 	return {
 		/**
-		 * Updates/creates new preference item
+		 * Creates new preference item with default value
 		 * @param {String} name Preference name. You can also pass object
 		 * with many options
 		 * @param {Object} value Preference default value
 		 * @param {String} description Item textual description
 		 * @memberOf preferences
 		 */
-		set: function(name, value, description) {
+		define: function(name, value, description) {
 			var prefs = name;
 			if (_.isString(name)) {
 				prefs = {};
@@ -4162,7 +4164,36 @@ zen_coding.define('preferences', function(require, _) {
 			}
 			
 			_.each(prefs, function(v, k) {
-				preferences[k] = isValueObj(v) ? v : {value: v};
+				defaults[k] = isValueObj(v) ? v : {value: v};
+			});
+		},
+		
+		/**
+		 * Updates preference item value. Preference value should be defined
+		 * first with <code>define</code> method.
+		 * @param {String} name Preference name. You can also pass object
+		 * with many options
+		 * @param {Object} value Preference default value
+		 * @memberOf preferences
+		 */
+		set: function(name, value) {
+			var prefs = name;
+			if (_.isString(name)) {
+				prefs = {};
+				prefs[name] = value;
+			}
+			
+			_.each(prefs, function(v, k) {
+				if (!(k in defaults)) {
+					throw 'Property "' + k + '" is not defined. You should define it first with `define` method of current module';
+				}
+				
+				// do not set value if it equals to default value
+				if (v !== defaults[k].value) {
+					preferences[k] = v;
+				} else if  (k in preferences) {
+					delete preferences[p];
+				}
 			});
 		},
 		
@@ -4173,7 +4204,13 @@ zen_coding.define('preferences', function(require, _) {
 		 * not defined
 		 */
 		get: function(name) {
-			return name in preferences ? preferences[name].value : void 0;
+			if (name in preferences)
+				return preferences[name];
+			
+			if (name in defaults)
+				return defaults[name].value;
+			
+			return void 0;
 		},
 		
 		/**
@@ -4199,11 +4236,11 @@ zen_coding.define('preferences', function(require, _) {
 		 * @returns {Object}
 		 */
 		description: function(name) {
-			return name in preferences ? preferences[name].description : void 0;
+			return name in defaults ? defaults[name].description : void 0;
 		},
 		
 		/**
-		 * Removes specified preference(s)
+		 * Completely removes specified preference(s)
 		 * @param {String} name Preference name (or array of names)
 		 */
 		remove: function(name) {
@@ -4213,6 +4250,9 @@ zen_coding.define('preferences', function(require, _) {
 			_.each(name, function(key) {
 				if (key in preferences)
 					delete preferences[key];
+				
+				if (key in defaults)
+					delete defaults[key];
 			});
 		},
 		
@@ -4221,13 +4261,13 @@ zen_coding.define('preferences', function(require, _) {
 		 * @returns {Array}
 		 */
 		list: function() {
-			return _.map(_.keys(preferences).sort(), function(key) {
+			return _.map(_.keys(defaults).sort(), function(key) {
 				return {
 					name: key,
-					value: preferences[key].value,
-					description: preferences[key].description
+					value: this.get(key),
+					description: defaults[key].description
 				};
-			});
+			}, this);
 		},
 		
 		/**
@@ -4242,10 +4282,20 @@ zen_coding.define('preferences', function(require, _) {
 		},
 		
 		/**
+		 * Reset to defaults
+		 * @returns
+		 */
+		reset: function() {
+			preferences = {};
+		},
+		
+		/**
 		 * For unit testing: use empty storage
 		 */
 		_startTest: function() {
-			_dbg = preferences;
+			_dbgDefaults = defaults;
+			_dbgPreferences = preferences;
+			defaults = {};
 			preferences = {};
 		},
 		
@@ -4253,7 +4303,8 @@ zen_coding.define('preferences', function(require, _) {
 		 * For unit testing: restore original storage
 		 */
 		_stopTest: function() {
-			preferences = _dbg;
+			defaults = _dbgDefaults;
+			preferences = _dbgPreferences;
 		}
 	};
 });/**
@@ -7973,7 +8024,7 @@ zen_coding.exec(function(require, _) {
  * -- Search for next/previous items in HTML
  * -- Search for next/previous items in CSS
  * @constructor
- * @memberOf __zenSelectItemAction
+ * @memberOf __selectItemActionDefine
  * @param {Function} require
  * @param {Underscore} _
  */
@@ -8177,11 +8228,24 @@ zen_coding.exec(function(require, _) {
 		
 		// no selected range, find nearest one
 		if (isBackward)
+			// search backward
 			return _.find(ranges, function(r) {
 				return r.start < selRange.start;
 			});
 		
 		// search forward
+		// to deal with overlapping ranges (like full attribute definition
+		// and attribute value) let's find range under caret first
+		if (!curRange) {
+			var matchedRanges = _.filter(ranges, function(r) {
+				return r.inside(selRange.end);
+			});
+			
+			if (matchedRanges.length > 1)
+				return matchedRanges[1];
+		}
+		
+		
 		return _.find(ranges, function(r) {
 			return r.end > selRange.end;
 		});
@@ -8318,6 +8382,15 @@ zen_coding.exec(function(require, _) {
 			
 			if (!curRange) {
 				// no selection, select nearest item
+				var matchedRanges = _.filter(possibleRanges, function(r) {
+					return r.inside(selRange.end);
+				});
+				
+				if (matchedRanges.length > 1) {
+					curRange = matchedRanges[1];
+					break;
+				}
+				
 				if (curRange = _.find(possibleRanges, nearestItemFn))
 					break;
 			} else {
@@ -8872,7 +8945,7 @@ zen_coding.exec(function(require, _) {
 	var prefs = require('preferences');
 	
 	// setup default preferences
-	prefs.set('css.closeBraceIndentation', '\n',
+	prefs.define('css.closeBraceIndentation', '\n',
 			'Indentation before closing brace of CSS rule. Some users prefere' 
 			+ 'indented closing brace of CSS rule for better readability. '
 			+ 'This preference’s value will be automatically inserted before '
@@ -9262,7 +9335,7 @@ zen_coding.exec(function(require, _) {
  * <br><br>
  * This module will capture all expanded properties and upgrade them with values, 
  * vendor prefixes and !important declarations. All unmatched abbreviations will 
- * be automatically transformed into <code>property-name: ${0}</code> snippets. 
+ * be automatically transformed into <code>property-name: ${1}</code> snippets. 
  * 
  * <b>Vendor prefixes<b><br>
  * 
@@ -9282,9 +9355,9 @@ zen_coding.exec(function(require, _) {
  * CSS property. For example, <code>-wm-float</code> will produce
  * 
  * <pre><code>
- * -webkit-float: ${0};
- * -moz-float: ${0};
- * float: ${0};
+ * -webkit-float: ${1};
+ * -moz-float: ${1};
+ * float: ${1};
  * </code></pre>
  * 
  * Although this example looks pointless, users can use this feature to write
@@ -9334,11 +9407,11 @@ zen_coding.define('cssResolver', function(require, _) {
 		'x': 'ex'
 	};
 	
-	var defaultValue = '${0};';
+	var defaultValue = '${1};';
 	
 	// XXX module preferences
 	var prefs = require('preferences');
-	prefs.set('css.valueSeparator', ': ',
+	prefs.define('css.valueSeparator', ': ',
 			'Defines a symbol that should be placed between CSS property and ' 
 			+ 'value when expanding CSS abbreviations.');
 	
@@ -9348,10 +9421,20 @@ zen_coding.define('cssResolver', function(require, _) {
 		+ 'abbreviations. Empty list means that all possible CSS values may ' 
 		+ 'have <code><%= vendor %></code> prefix.');
 	
-	prefs.set('css.webkitProperties', '', descTemplate({vendor: 'webkit'}));
-	prefs.set('css.mozProperties', '', descTemplate({vendor: 'moz'}));
-	prefs.set('css.msProperties', '', descTemplate({vendor: 'ms'}));
-	prefs.set('css.oProperties', '', descTemplate({vendor: 'o'}));
+	// properties list is created from cssFeatures.html file
+	var props = {
+		'webkit': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-clip, background-composite, background-origin, background-size, border-fit, border-horizontal-spacing, border-image, border-vertical-spacing, box-align, box-direction, box-flex, box-flex-group, box-lines, box-ordinal-group, box-orient, box-pack, box-reflect, box-shadow, color-correction, column-break-after, column-break-before, column-break-inside, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-span, column-width, dashboard-region, font-smoothing, highlight, hyphenate-character, hyphenate-limit-after, hyphenate-limit-before, hyphens, line-box-contain, line-break, line-clamp, locale, margin-before-collapse, margin-after-collapse, marquee-direction, marquee-increment, marquee-repetition, marquee-style, mask-attachment, mask-box-image, mask-box-image-outset, mask-box-image-repeat, mask-box-image-slice, mask-box-image-source, mask-box-image-width, mask-clip, mask-composite, mask-image, mask-origin, mask-position, mask-repeat, mask-size, nbsp-mode, perspective, perspective-origin, rtl-ordering, text-combine, text-decorations-in-effect, text-emphasis-color, text-emphasis-position, text-emphasis-style, text-fill-color, text-orientation, text-security, text-stroke-color, text-stroke-width, transform, transform-origin, transform-style, transition-delay, transition-duration, transition-property, transition-timing-function, user-drag, user-modify, user-select, writing-mode, svg-shadow',
+		'moz': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-inline-policy, binding, border-bottom-colors, border-image, border-left-colors, border-right-colors, border-top-colors, box-align, box-direction, box-flex, box-ordinal-group, box-orient, box-pack, box-shadow, box-sizing, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-width, float-edge, font-feature-settings, font-language-override, force-broken-image-icon, hyphens, image-region, orient, outline-radius-bottomleft, outline-radius-bottomright, outline-radius-topleft, outline-radius-topright, perspective, perspective-origin, stack-sizing, tab-size, text-blink, text-decoration-color, text-decoration-line, text-decoration-style, text-size-adjust, transform, transform-origin, transform-style, transition-delay, transition-duration, transition-property, transition-timing-function, user-focus, user-input, user-modify, user-select, window-shadow',
+		'ms': 'accelerator, animation, animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, backface-visibility, background-position-x, background-position-y, behavior, block-progression, box-align, box-direction, box-flex, box-line-progression, box-lines, box-ordinal-group, box-orient, box-pack, content-zoom-boundary, content-zoom-boundary-max, content-zoom-boundary-min, content-zoom-chaining, content-zoom-snap, content-zoom-snap-points, content-zoom-snap-type, content-zooming, filter, flow-from, flow-into, font-feature-settings, grid-column, grid-column-align, grid-column-span, grid-columns, grid-layer, grid-row, grid-row-align, grid-row-span, grid-rows, high-contrast-adjust, hyphenate-limit-chars, hyphenate-limit-lines, hyphenate-limit-zone, hyphens, ime-mode, interpolation-mode, layout-flow, layout-grid, layout-grid-char, layout-grid-line, layout-grid-mode, layout-grid-type, line-break, overflow-style, overflow-x, overflow-y, perspective, perspective-origin, perspective-origin-x, perspective-origin-y, scroll-boundary, scroll-boundary-bottom, scroll-boundary-left, scroll-boundary-right, scroll-boundary-top, scroll-chaining, scroll-rails, scroll-snap-points-x, scroll-snap-points-y, scroll-snap-type, scroll-snap-x, scroll-snap-y, scrollbar-arrow-color, scrollbar-base-color, scrollbar-darkshadow-color, scrollbar-face-color, scrollbar-highlight-color, scrollbar-shadow-color, scrollbar-track-color, text-align-last, text-autospace, text-justify, text-kashida-space, text-overflow, text-size-adjust, text-underline-position, touch-action, transform, transform-origin, transform-origin-x, transform-origin-y, transform-origin-z, transform-style, transition, transition-delay, transition-duration, transition-property, transition-timing-function, user-select, word-break, word-wrap, wrap-flow, wrap-margin, wrap-through, writing-mode, zoom',
+		'o': 'dashboard-region, animation, animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, border-image, link, link-source, object-fit, object-position, tab-size, table-baseline, transform, transform-origin, transition, transition-delay, transition-duration, transition-property, transition-timing-function, accesskey, input-format, input-required, marquee-dir, marquee-loop, marquee-speed, marquee-style'
+	};
+	
+	_.each(props, function(v, k) {
+		prefs.define('css.' + k + 'Properties', v, descTemplate({vendor: k}));
+	});
+	
+	prefs.define('css.unitlessProperties', 'z-index, line-height', 
+			'The list of properties whose values ​​must not contain units.');
 	
 	function isNumeric(ch) {
 		var code = ch && ch.charCodeAt(0);
@@ -9492,6 +9575,10 @@ zen_coding.define('cssResolver', function(require, _) {
 		supports: prefs.getArray('css.oProperties')
 	});
 	
+	var unitlessProps = prefs.getArray('css.unitlessProperties');
+	var floatUnit = 'em';
+	var intUnit = 'px';
+	
 	// I think nobody uses it
 //	addPrefix('k', {
 //		prefix: 'khtml',
@@ -9505,7 +9592,7 @@ zen_coding.define('cssResolver', function(require, _) {
 	 */
 	require('resources').addResolver(function(node, syntax) {
 		if (syntax == 'css' && node.isElement()) {
-			return require('cssResolver').expandToSnippet(node.name);
+			return require('cssResolver').expandToSnippet(node.abbreviation);
 		}
 		
 		return null;
@@ -9701,12 +9788,17 @@ zen_coding.define('cssResolver', function(require, _) {
 		/**
 		 * Normalizes value, defined in abbreviation.
 		 * @param {String} value
+		 * @param {String} property
 		 * @returns {String}
 		 */
-		normalizeValue: function(value) {
+		normalizeValue: function(value, property) {
+			property = (property || '').toLowerCase();
 			return value.replace(/^(\-?[0-9\.]+)([a-z]*)$/, function(str, val, unit) {
+				if (!unit && (val == '0' || _.include(unitlessProps, property)))
+					return val;
+				
 				if (!unit)
-					return val + (~val.indexOf('.') ? 'em' : 'px');
+					return val + (~val.indexOf('.') ? floatUnit : intUnit);
 				
 				return val + (unit in unitAliases ? unitAliases[unit] : unit);
 			});
@@ -9751,10 +9843,11 @@ zen_coding.define('cssResolver', function(require, _) {
 			}
 			
 			var snippetObj = splitSnippet(snippet);
-			
 			var result = [];
 			if (!value && abbrData.values) {
-				value = _.map(abbrData.values, this.normalizeValue).join(' ') + ';';
+				value = _.map(abbrData.values, function(val) {
+					return this.normalizeValue(val, snippetObj.name);
+				}, this).join(' ') + ';';
 			}
 			
 			snippetObj.value = value || snippetObj.value;
@@ -9819,14 +9912,14 @@ zen_coding.define('cssGradient', function(require, _) {
 	// XXX define preferences
 	/** @type preferences */
 	var prefs = require('preferences');
-	prefs.set('css.gradient.prefixes', 'webkit, moz, ms, o',
+	prefs.define('css.gradient.prefixes', 'webkit, moz, ms, o',
 			'A comma-separated list of vendor-prefixes for which values should ' 
 			+ 'be generated.');
 	
-	prefs.set('css.gradient.oldWebkit', true,
+	prefs.define('css.gradient.oldWebkit', true,
 			'Generate gradient definition for old Webkit implementations');
 	
-	prefs.set('css.gradient.omitDefaultDirection', true,
+	prefs.define('css.gradient.omitDefaultDirection', true,
 		'Do not output default direction definition in generated gradients.');
 	
 	function normalizeSpace(str) {
@@ -10055,7 +10148,7 @@ zen_coding.define('cssGradient', function(require, _) {
 					var ruleEnd = ruleStart + cssRule.toString().length;
 					
 					pasteGradient(cssProp, gradient);
-					editor.replaceContent(cssRule.toString(), ruleStart, ruleEnd);
+					editor.replaceContent(cssRule.toString(), ruleStart, ruleEnd, true);
 					editor.setCaretPos(cssProp.valueRange(true).end);
 					return true;
 				}
@@ -10414,9 +10507,9 @@ zen_coding.define('tagName', function(require, _) {
  */
 zen_coding.exec(function(require, _) {
 	var prefs = require('preferences');
-	prefs.set('bem.elementSeparator', '__', 'Class name’s element separator.');
-	prefs.set('bem.modifierSeparator', '_', 'Class name’s modifier separator.');
-	prefs.set('bem.shortElementPrefix', '-', 
+	prefs.define('bem.elementSeparator', '__', 'Class name’s element separator.');
+	prefs.define('bem.modifierSeparator', '_', 'Class name’s modifier separator.');
+	prefs.define('bem.shortElementPrefix', '-', 
 			'Symbol for describing short “block-element” notation. Class names '
 			+ 'prefixed with this symbol will be treated as element name for parent‘s '
 			+ 'block name. Each symbol instance traverses one level up in parsed ' 
@@ -10446,26 +10539,28 @@ zen_coding.exec(function(require, _) {
 		};
 		
 		var classNames = normalizeClassName(item.getAttribute('class')).split(' ');
-		var allClassNames = _.chain(classNames)
+		
+		// guess best match for block name
+		var reBlockName = /^[a-z]\-/i;
+		item.__bem.block = _.find(classNames, function(name) {
+			return reBlockName.test(name);
+		});
+		
+		// guessing doesn't worked, pick first class name as block name
+		if (!item.__bem.block) {
+			reBlockName = /^[a-z]/i;
+			item.__bem.block = _.find(classNames, function(name) {
+				return reBlockName.test(name);
+			}) || '';
+		}
+		
+		classNames = _.chain(classNames)
 			.map(function(name) {return processClassName(name, item);})
 			.flatten()
 			.uniq()
 			.value();
 		
-		item.setAttribute('class', allClassNames.join(' '));
-		
-		if (!item.__bem.block) {
-			// guess best match for block name
-			var reBlockName = /^[a-z]\-/i;
-			item.__bem.block = _.find(allClassNames, function(name) {
-				return reBlockName.test(name);
-			});
-			
-			// guessing doesn't worked, pick first class name as block name
-			if (!item.__bem.block) {
-				item.__bem.block = allClassNames[0];
-			}
-		}
+		item.setAttribute('class', classNames.join(' '));
 		
 		return item;
 	}
@@ -10626,11 +10721,11 @@ zen_coding.exec(function(require, _) {
 	 */
 	function process(tree, profile) {
 		if (tree.name)
-			bemParse(tree);
+			bemParse(tree, profile);
 		
 		var elements = require('elements');
 		_.each(tree.children, function(item) {
-			process(bemParse(item), profile);
+			process(item, profile);
 			if (elements.is(item.source, 'parsedElement') && item.start)
 				shouldRunHtmlFilter = true;
 		});
@@ -10665,7 +10760,7 @@ zen_coding.exec(function(require, _) {
 	/** @type zen_coding.preferences */
 	var prefs = require('preferences');
 	
-	prefs.set('filter.commentAfter', 
+	prefs.define('filter.commentAfter', 
 			'\n<%= padding %><!-- /<%= attr("id", "#") %><%= attr("class", ".") %> -->',
 			'A definition of comment that should be placed <i>after</i> matched '
 			+ 'element when <code>comment</code> filter is applied. This definition '
@@ -10688,14 +10783,14 @@ zen_coding.exec(function(require, _) {
 			
 			+'</ul>');
 	
-	prefs.set('filter.commentBefore', 
+	prefs.define('filter.commentBefore', 
 			'',
 			'A definition of comment that should be placed <i>before</i> matched '
 			+ 'element when <code>comment</code> filter is applied. '
 			+ 'For more info, read description of <code>filter.commentAfter</code> '
 			+ 'property');
 	
-	prefs.set('filter.commentTrigger', 'id, class',
+	prefs.define('filter.commentTrigger', 'id, class',
 			'A comma-separated list of attribute names that should exist on tag '
 			+ 'where comment should be added. If you wish to add comment for '
 			+ 'every element, set this option to <code>*</code>');
@@ -10983,6 +11078,10 @@ zen_coding.exec(function(require, _) {
 zen_coding.exec(function(require, _) {
 	var childToken = '${child}';
 	
+	function transformClassName(className) {
+		return require('utils').trim(className).replace(/\s+/g, '.');
+	}
+	
 	/**
 	 * Creates HAML attributes string from tag according to profile settings
 	 * @param {ZenNode} tag
@@ -11003,7 +11102,7 @@ zen_coding.exec(function(require, _) {
 					attrs += '#' + (a.value || cursor);
 					break;
 				case 'class':
-					attrs += '.' + (a.value || cursor);
+					attrs += '.' + transformClassName(a.value || cursor);
 					break;
 				// process other attributes
 				default:
@@ -11326,7 +11425,7 @@ zen_coding.exec(function(require, _) {
  * @param {Underscore} _
  */
 zen_coding.exec(function(require, _) {
-	require('preferences').set('filter.trimRegexp', '[\\s|\\u00a0]*[\\d|#|\\-|\*|\\u2022]+\\.?\\s*',
+	require('preferences').define('filter.trimRegexp', '[\\s|\\u00a0]*[\\d|#|\\-|\*|\\u2022]+\\.?\\s*',
 			'Regular expression used to remove list markers (numbers, dashes, ' 
 			+ 'bullets, etc.) in <code>t</code> (trim) filter. The trim filter '
 			+ 'is useful for wrapping with abbreviation lists, pased from other ' 
@@ -11337,7 +11436,7 @@ zen_coding.exec(function(require, _) {
 			if (item.content)
 				item.content = item.content.replace(re, '');
 			
-			process(item);
+			process(item, re);
 		});
 		
 		return tree;
@@ -11423,7 +11522,7 @@ zen_coding.exec(function(require, _) {
 			elemName = 'p';
 		}
 		
-		var elem = require('elements').create('parsedElement', node, syntax, elemName);
+		var elem = require('elements').create('parsedElement', node, syntax, elemName || '');
 		// override 'getContent()' method so it will output lorem ipsum dynamically,
 		// when tree will be rolled out
 		elem._content = function(el) {
@@ -11498,7 +11597,7 @@ zen_coding.exec(function(require, _) {
 		var iterations = Math.min(len, count);
 		var result = [];
 		while (result.length < iterations) {
-			var randIx = randint(0, len);
+			var randIx = randint(0, len - 1);
 			if (!_.include(result, randIx))
 				result.push(randIx);
 		}
