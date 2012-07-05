@@ -29,7 +29,7 @@ public class TabStopStructure {
 		createGroups();
 		
 		JSExecutor jse = JSExecutor.getSingleton();
-		Scriptable tabstopData = (Scriptable) jse.execJSFunction("require('tabStops').extract", text);
+		Scriptable tabstopData = (Scriptable) jse.execJSFunction("javaExtractTabstops", text);
 		if (tabstopData != null) {
 			text = Context.toString(ScriptableObject.getProperty(tabstopData, "text"));
 			NativeArray tabstops = (NativeArray) ScriptableObject.getProperty(tabstopData, "tabstops");

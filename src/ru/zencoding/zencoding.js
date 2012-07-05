@@ -1199,12 +1199,16 @@
 			
 			var filters = this.require('filters');
 			var utils = this.require('utils');
-			var transform = this.require('transform');
+			var parser = this.require('abbreviationParser');
 			
 			profile = this.require('profile').get(profile, syntax);
+			this.require('tabStops').resetTabstopIndex();
 			
 			var data = filters.extractFromAbbreviation(abbr);
-			var outputTree = transform.transform(data[0], syntax, contextNode);
+			var outputTree = parser.parse(data[0], {
+				syntax: syntax, 
+				contextNode: contextNode
+			});
 			var filtersList = filters.composeList(syntax, profile, data[1]);
 			filters.apply(outputTree, filtersList, profile);
 			return utils.replaceVariables(outputTree.toString());
@@ -1243,6 +1247,1921 @@
 		}
 	};
 })(this, _);/**
+ * Zen Coding abbreviation parser.
+ * Takes string abbreviation and recursively parses it into a tree. The parsed 
+ * tree can be transformed into a string representation with 
+ * <code>toString()</code> method. Note that string representation is defined
+ * by custom processors (called <i>filters</i>), not by abbreviation parser 
+ * itself.
+ * 
+ * This module can be extended with custom pre-/post-processors to shape-up
+ * final tree or its representation. Actually, many features of abbreviation 
+ * engine are defined in other modules as tree processors
+ * 
+ * 
+ * @author Sergey Chikuyonok (serge.che@gmail.com)
+ * @link http://chikuyonok.ru
+ * @memberOf __abbreviationParser
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('abbreviationParser', function(require, _) {
+	var reValidName = /^[\w\-\$\:@\!]+\+?$/i;
+	var reWord = /[\w\-:\$]/;
+	
+	var pairs = {
+		'[': ']',
+		'(': ')',
+		'{': '}'
+	};
+	
+	var spliceFn = Array.prototype.splice;
+	
+	var preprocessors = [];
+	var postprocessors = [];
+	var outputProcessors = [];
+	
+	/**
+	 * @type AbbreviationNode
+	 */
+	function AbbreviationNode(parent) {
+		/** @type AbbreviationNode */
+		this.parent = null;
+		this.children = [];
+		this._attributes = [];
+		
+		/** @type String Raw abbreviation for current node */
+		this.abbreviation = '';
+		this.counter = 1;
+		this._name = null;
+		this._text = '';
+		this.repeatCount = 1;
+		this.hasImplicitRepeat = false;
+		
+		/** Custom data dictionary */
+		this._data = {};
+		
+		// output properties
+		this.start = '';
+		this.end = '';
+		this.content = '';
+		this.padding = '';
+	}
+	
+	AbbreviationNode.prototype = {
+		/**
+		 * Adds passed node as child or creates new child
+		 * @param {AbbreviationNode} child
+		 * @param {Number} position Index in children array where child should 
+		 * be inserted
+		 * @return {AbbreviationNode}
+		 */
+		addChild: function(child, position) {
+			child = child || new AbbreviationNode;
+			child.parent = this;
+			
+			if (_.isUndefined(position)) {
+				this.children.push(child);
+			} else {
+				this.children.splice(position, 0, child);
+			}
+			
+			return child;
+		},
+		
+		/**
+		 * Creates a deep copy of current node
+		 * @returns {AbbreviationNode}
+		 */
+		clone: function() {
+			var node = new AbbreviationNode();
+			var attrs = ['abbreviation', 'counter', '_name', '_text', 'repeatCount', 'hasImplicitRepeat', 'start', 'end', 'content', 'padding'];
+			_.each(attrs, function(a) {
+				node[a] = this[a];
+			}, this);
+			
+			// clone attributes
+			node._attributes = _.map(this._attributes, function(attr) {
+				return _.clone(attr);
+			});
+			
+			node._data = _.clone(this._data);
+			
+			// clone children
+			node.children = _.map(this.children, function(child) {
+				child = child.clone();
+				child.parent = node;
+				return child;
+			});
+			
+			return node;
+		},
+		
+		/**
+		 * Removes current node from parent‘s child list
+		 * @returns {AbbreviationNode} Current node itself
+		 */
+		remove: function() {
+			if (this.parent) {
+				this.parent.children = _.without(this.parent.children, this);
+			}
+			
+			return this;
+		},
+		
+		/**
+		 * Replaces current node in parent‘s children list with passed nodes
+		 * @param {AbbreviationNode} node Replacement node or array of nodes
+		 */
+		replace: function() {
+			var parent = this.parent;
+			var ix = _.indexOf(parent.children, this);
+			var items = _.flatten(arguments);
+			spliceFn.apply(parent.children, [ix, 1].concat(items));
+			
+			// update parent
+			_.each(items, function(item) {
+				item.parent = parent;
+			});
+		},
+		
+		/**
+		 * Recursively sets <code>property</code> to <code>value</code> of current
+		 * node and its children 
+		 * @param {String} name Property to update
+		 * @param {Object} value New property value
+		 */
+		updateProperty: function(name, value) {
+			this[name] = value;
+			_.each(this.children, function(child) {
+				child.updateProperty(name, value);
+			});
+		},
+		
+		/**
+		 * Finds first child node that matches truth test for passed 
+		 * <code>fn</code> function
+		 * @param {Function} fn
+		 * @returns {AbbreviationNode}
+		 */
+		find: function(fn) {
+			if (!_.isFunction(fn)) {
+				var elemName = fn.toLowerCase();
+				fn = function(item) {return item.name().toLowerCase() == elemName;};
+			}
+			
+			var result = null;
+			_.find(this.children, function(child) {
+				if (fn(child)) {
+					return result = child;
+				}
+				
+				return result = child.find(fn);
+			});
+			
+			return result;
+		},
+		
+		/**
+		 * Finds all child nodes that matches truth test for passed 
+		 * <code>fn</code> function
+		 * @param {Function} fn
+		 * @returns {Array}
+		 */
+		findAll: function(fn) {
+			if (!_.isFunction(fn)) {
+				var elemName = fn.toLowerCase();
+				fn = function(item) {return item.name().toLowerCase() == elemName;};
+			}
+				
+			var result = [];
+			_.each(this.children, function(child) {
+				if (fn(child))
+					result.push(child);
+				
+				result = result.concat(child.findAll(fn));
+			});
+			
+			return _.compact(result);
+		},
+		
+		/**
+		 * Sets/gets custom data
+		 * @param {String} name
+		 * @param {Object} value
+		 * @returns {Object}
+		 */
+		data: function(name, value) {
+			if (arguments.length == 2) {
+				this._data[name] = value;
+				
+				if (name == 'resource' && require('elements').is(value, 'snippet')) {
+					// setting snippet as matched resource: update `content`
+					// property with snippet value
+					this.content = value.data;
+					if (this._text) {
+						this.content = require('abbreviationUtils')
+							.insertChildContent(value.data, this._text);
+					}
+				}
+			}
+			
+			return this._data[name];
+		},
+		
+		/**
+		 * Returns name of current node
+		 * @returns {String}
+		 */
+		name: function() {
+			var res = this.matchedResource();
+			if (require('elements').is(res, 'element')) {
+				return res.name;
+			}
+			
+			return this._name;
+		},
+		
+		/**
+		 * Returns list of attributes for current node
+		 * @returns {Array}
+		 */
+		attributeList: function() {
+			var attrs = [];
+			
+			var res = this.matchedResource();
+			if (require('elements').is(res, 'element') && _.isArray(res.attributes)) {
+				attrs = attrs.concat(res.attributes);
+			}
+			
+			return optimizeAttributes(attrs.concat(this._attributes));
+		},
+		
+		/**
+		 * Returns or sets attribute value
+		 * @param {String} name Attribute name
+		 * @param {String} value New attribute value
+		 * @returns {String}
+		 */
+		attribute: function(name, value) {
+			if (arguments.length == 2) {
+				// modifying attribute
+				var ix = _.indexOf(_.pluck(this._attributes, 'name'), name.toLowerCase());
+				if (~ix) {
+					this._attributes[ix].value = value;
+				}
+			}
+			
+			return (_.find(this.attributeList(), function(attr) {
+				return attr.name == name;
+			}) || {}).value;
+		},
+		
+		/**
+		 * Returns reference to the matched <code>element</code>, if any.
+		 * See {@link elements} module for a list of available elements
+		 * @returns {Object}
+		 */
+		matchedResource: function() {
+			return this.data('resource');
+		},
+		
+		/**
+		 * Returns index of current node in parent‘s children list
+		 * @returns {Number}
+		 */
+		index: function() {
+			return this.parent ? _.indexOf(this.parent.children, this) : -1;
+		},
+		
+		/**
+		 * Sets how many times current element should be repeated
+		 * @private
+		 */
+		_setRepeat: function(count) {
+			if (count) {
+				this.repeatCount = parseInt(count, 10) || 1;
+			} else {
+				this.hasImplicitRepeat = true;
+			}
+		},
+		
+		/**
+		 * Sets abbreviation that belongs to current node
+		 * @param {String} abbr
+		 */
+		setAbbreviation: function(abbr) {
+			abbr = abbr || '';
+			
+			var that = this;
+			
+			// find multiplier
+			abbr = abbr.replace(/\*(\d+)?$/, function(str, repeatCount) {
+				that._setRepeat(repeatCount);
+				return '';
+			});
+			
+			this.abbreviation = abbr;
+			
+			var abbrText = extractText(abbr);
+			if (abbrText) {
+				abbr = abbrText.element;
+				this.content = this._text = abbrText.text;
+			}
+			
+			var abbrAttrs = parseAttributes(abbr);
+			if (abbrAttrs) {
+				abbr = abbrAttrs.element;
+				this._attributes = abbrAttrs.attributes;
+			}
+			
+			this._name = abbr;
+			
+			// validate name
+			if (this._name && !reValidName.test(this._name)) {
+				throw 'Invalid abbreviation';
+			}
+		},
+		
+		/**
+		 * Returns string representation of current node
+		 * @return {String}
+		 */
+		toString: function() {
+			var utils = require('utils');
+			
+			var start = this.start;
+			var end = this.end;
+			var content = this.content;
+			
+			// apply output processors
+			var node = this;
+			_.each(outputProcessors, function(fn) {
+				start = fn(start, node, 'start');
+				content = fn(content, node, 'content');
+				end = fn(end, node, 'end');
+			});
+			
+			
+			var innerContent = _.map(this.children, function(child) {
+				return child.toString();
+			}).join('');
+			
+			content = require('abbreviationUtils').insertChildContent(content, innerContent, {
+				keepVariable: false
+			});
+			
+			return start + utils.padString(content, this.padding) + end;
+		},
+		
+		/**
+		 * Check if current node contains children with empty <code>expr</code>
+		 * property
+		 * @return {Boolean}
+		 */
+		hasEmptyChildren: function() {
+			return !!_.find(this.children, function(child) {
+				return child.isEmpty();
+			});
+		},
+		
+		/**
+		 * Check if current node has implied name that should be resolved
+		 * @returns {Boolean}
+		 */
+		hasImplicitName: function() {
+			return !this._name && !this.isTextNode();
+		},
+		
+		/**
+		 * Indicates that current element is a grouping one, e.g. has no 
+		 * representation but serves as a container for other nodes
+		 * @returns {Boolean}
+		 */
+		isGroup: function() {
+			return !this.abbreviation;
+		},
+		
+		/**
+		 * Indicates empty node (i.e. without abbreviation). It may be a 
+		 * grouping node and should not be outputted
+		 * @return {Boolean}
+		 */
+		isEmpty: function() {
+			return !this.abbreviation && !this.children.length;
+		},
+		
+		/**
+		 * Indicates that current node should be repeated
+		 * @returns {Boolean}
+		 */
+		isRepeating: function() {
+			return this.repeatCount > 1 || this.hasImplicitRepeat;
+		},
+		
+		/**
+		 * Check if current node is a text-only node
+		 * @return {Boolean}
+		 */
+		isTextNode: function() {
+			return !this.name() && !this.attributeList().length;
+		},
+		
+		/**
+		 * Indicates whether this node may be used to build elements or snippets
+		 * @returns {Boolean}
+		 */
+		isElement: function() {
+			return !this.isEmpty() && !this.isTextNode();
+		},
+		
+		/**
+		 * Returns latest and deepest child of current tree
+		 * @returns {AbbreviationNode}
+		 */
+		deepestChild: function() {
+			if (!this.children.length)
+				return null;
+				
+			var deepestChild = this;
+			while (deepestChild.children.length) {
+				deepestChild = _.last(deepestChild.children);
+			}
+			
+			return deepestChild;
+		}
+	};
+	
+	/**
+	 * Returns stripped string: a string without first and last character.
+	 * Used for “unquoting” strings
+	 * @param {String} str
+	 * @returns {String}
+	 */
+	function stripped(str) {
+		return str.substring(1, str.length - 1);
+	}
+	
+	function consumeQuotedValue(stream, quote) {
+		var ch;
+		while (ch = stream.next()) {
+			if (ch === quote)
+				return true;
+			
+			if (ch == '\\')
+				continue;
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Parses abbreviation into a tree
+	 * @param {String} abbr
+	 * @returns {AbbreviationNode}
+	 */
+	function parseAbbreviation(abbr) {
+		abbr = require('utils').trim(abbr);
+		
+		var root = new AbbreviationNode;
+		var context = root.addChild(), ch;
+		
+		/** @type StringStream */
+		var stream = require('stringStream').create(abbr);
+		var loopProtector = 1000, multiplier;
+		
+		while (!stream.eol() && --loopProtector > 0) {
+			ch = stream.peek();
+			
+			switch (ch) {
+				case '(': // abbreviation group
+					stream.start = stream.pos;
+					if (stream.skipToPair('(', ')')) {
+						var inner = parseAbbreviation(stripped(stream.current()));
+						if (multiplier = stream.match(/^\*(\d+)?/, true)) {
+							context._setRepeat(multiplier[1]);
+						}
+						
+						_.each(inner.children, function(child) {
+							context.addChild(child);
+						});
+					} else {
+						throw 'Invalid abbreviation: mo matching ")" found for character at ' + stream.pos;
+					}
+					break;
+					
+				case '>': // child operator
+					context = context.addChild();
+					stream.next();
+					break;
+					
+				case '+': // sibling operator
+					context = context.parent.addChild();
+					stream.next();
+					break;
+					
+				case '^': // climb up operator
+					var parent = context.parent || context;
+					context = (parent.parent || parent).addChild();
+					stream.next();
+					break;
+					
+				default: // consume abbreviation
+					stream.start = stream.pos;
+					stream.eatWhile(function(c) {
+						if (c == '[' || c == '{') {
+							if (stream.skipToPair(c, pairs[c])) {
+								stream.backUp(1);
+								return true;
+							}
+							
+							throw 'Invalid abbreviation: mo matching "' + pairs[c] + '" found for character at ' + stream.pos;
+						}
+						
+						if (c == '+') {
+							// let's see if this is an expando marker
+							stream.next();
+							var isMarker = stream.eol() ||  ~'+>^*'.indexOf(stream.peek());
+							stream.backUp(1);
+							return isMarker;
+						}
+						
+						return c != '(' && isAllowedChar(c);
+					});
+					
+					context.setAbbreviation(stream.current());
+					stream.start = stream.pos;
+			}
+		}
+		
+		if (loopProtector < 1)
+			throw 'Endless loop detected';
+		
+		return root;
+	}
+	
+	/**
+	 * Extract attributes and their values from attribute set: 
+	 * <code>[attr col=3 title="Quoted string"]</code>
+	 * @param {String} attrSet
+	 * @returns {Array}
+	 */
+	function extractAttributes(attrSet, attrs) {
+		attrSet = require('utils').trim(attrSet);
+		var result = [];
+		
+		/** @type StringStream */
+		var stream = require('stringStream').create(attrSet);
+		stream.eatSpace();
+		
+		while (!stream.eol()) {
+			stream.start = stream.pos;
+			if (stream.eatWhile(reWord)) {
+				var attrName = stream.current();
+				var attrValue = '';
+				if (stream.peek() == '=') {
+					stream.next();
+					stream.start = stream.pos;
+					var quote = stream.peek();
+					
+					if (quote == '"' || quote == "'") {
+						stream.next();
+						if (consumeQuotedValue(stream, quote)) {
+							attrValue = stream.current();
+							// strip quotes
+							attrValue = attrValue.substring(1, attrValue.length - 1);
+						} else {
+							throw 'Invalid attribute value';
+						}
+					} else if (stream.eatWhile(/[^\s\]]/)) {
+						attrValue = stream.current();
+					} else {
+						throw 'Invalid attribute value';
+					}
+				}
+				
+				result.push({
+					name: attrName, 
+					value: attrValue
+				});
+				stream.eatSpace();
+			} else {
+				break;
+			}
+		}
+		
+		return result;
+	}
+	
+	/**
+	 * Parses tag attributes extracted from abbreviation. If attributes found, 
+	 * returns object with <code>element</code> and <code>attributes</code>
+	 * properties
+	 * @param {String} abbr
+	 * @returns {Object} Returns <code>null</code> if no attributes found in 
+	 * abbreviation
+	 */
+	function parseAttributes(abbr) {
+		/*
+		 * Example of incoming data:
+		 * #header
+		 * .some.data
+		 * .some.data#header
+		 * [attr]
+		 * #item[attr=Hello other="World"].class
+		 */
+		var result = [];
+		var attrMap = {'#': 'id', '.': 'class'};
+		var nameEnd = null;
+		
+		/** @type StringStream */
+		var stream = require('stringStream').create(abbr);
+		while (!stream.eol()) {
+			switch (stream.peek()) {
+				case '#': // id
+				case '.': // class
+					if (nameEnd === null)
+						nameEnd = stream.pos;
+					
+					var attrName = attrMap[stream.peek()];
+					
+					stream.next();
+					stream.start = stream.pos;
+					stream.eatWhile(reWord);
+					result.push({
+						name: attrName, 
+						value: stream.current()
+					});
+					break;
+				case '[': //begin attribute set
+					if (nameEnd === null)
+						nameEnd = stream.pos;
+					
+					stream.start = stream.pos;
+					if (!stream.skipToPair('[', ']')) 
+						throw 'Invalid attribute set definition';
+					
+					result = result.concat(
+						extractAttributes(stripped(stream.current()))
+					);
+					break;
+				default:
+					stream.next();
+			}
+		}
+		
+		if (!result.length)
+			return null;
+		
+		return {
+			element: abbr.substring(0, nameEnd),
+			attributes: optimizeAttributes(result)
+		};
+	}
+	
+	/**
+	 * Optimize attribute set: remove duplicates and merge class attributes
+	 * @param attrs
+	 */
+	function optimizeAttributes(attrs) {
+		// clone all attributes to make sure that original objects are 
+		// not modified
+		attrs  = _.map(attrs, function(attr) {
+			return _.clone(attr);
+		});
+		
+		var lookup = {};
+		return _.filter(attrs, function(attr) {
+			if (!(attr.name in lookup)) {
+				return lookup[attr.name] = attr;
+			}
+			
+			var la = lookup[attr.name];
+			
+			if (attr.name.toLowerCase() == 'class') {
+				la.value += (la.value.length ? ' ' : '') + attr.value;
+			} else {
+				la.value = attr.value;
+			}
+			
+			return false;
+		});
+	}
+	
+	/**
+	 * Extract text data from abbreviation: if <code>a{hello}</code> abbreviation
+	 * is passed, returns object <code>{element: 'a', text: 'hello'}</code>.
+	 * If nothing found, returns <code>null</code>
+	 * @param {String} abbr
+	 * 
+	 */
+	function extractText(abbr) {
+		if (!~abbr.indexOf('{'))
+			return null;
+		
+		/** @type StringStream */
+		var stream = require('stringStream').create(abbr);
+		while (!stream.eol()) {
+			switch (stream.peek()) {
+				case '[':
+				case '(':
+					stream.skipToPair(stream.peek(), pairs[stream.peek()]); break;
+					
+				case '{':
+					stream.start = stream.pos;
+					stream.skipToPair('{', '}');
+					return {
+						element: abbr.substring(0, stream.start),
+						text: stripped(stream.current())
+					};
+					
+				default:
+					stream.next();
+			}
+		}
+	}
+	
+	/**
+	 * “Un-rolls“ contents of current node: recursively replaces all repeating 
+	 * children with their repeated clones
+	 * @param {AbbreviationNode} node
+	 * @returns {AbbreviationNode}
+	 */
+	function unroll(node) {
+		for (var i = node.children.length - 1, j, child; i >= 0; i--) {
+			child = node.children[i];
+			
+			if (child.isRepeating()) {
+				j = child.repeatCount;
+				child.repeatCount = 1;
+				child.updateProperty('counter', 1);
+				while (--j > 0) {
+					child.parent.addChild(child.clone(), i + 1)
+						.updateProperty('counter', j + 1);
+				}
+			}
+		}
+		
+		// to keep proper 'counter' property, we need to walk
+		// on children once again
+		_.each(node.children, unroll);
+		
+		return node;
+	}
+	
+	/**
+	 * Optimizes tree node: replaces empty nodes with their children
+	 * @param {AbbreviationNode} node
+	 * @return {AbbreviationNode}
+	 */
+	function squash(node) {
+		for (var i = node.children.length - 1; i >= 0; i--) {
+			/** @type AbbreviationNode */
+			var n = node.children[i];
+			if (n.isGroup()) {
+				n.replace(squash(n).children);
+			} else if (n.isEmpty()) {
+				n.remove();
+			}
+		}
+		
+		_.each(node.children, squash);
+		
+		return node;
+	}
+	
+	function isAllowedChar(ch) {
+		var charCode = ch.charCodeAt(0);
+		var specialChars = '#.*:$-_!@|';
+		
+		return (charCode > 64 && charCode < 91)       // uppercase letter
+				|| (charCode > 96 && charCode < 123)  // lowercase letter
+				|| (charCode > 47 && charCode < 58)   // number
+				|| specialChars.indexOf(ch) != -1;    // special character
+	}
+	
+	// XXX add counter replacer function as output processor
+	outputProcessors.push(function(text, node) {
+		return require('utils').replaceCounter(text, node.counter);
+	});
+	
+	return {
+		/**
+		 * Parses abbreviation into tree with respect of groups, 
+		 * text nodes and attributes. Each node of the tree is a single 
+		 * abbreviation. Tree represents actual structure of the outputted 
+		 * result
+		 * @memberOf abbreviationParser
+		 * @param {String} abbr Abbreviation to parse
+		 * @param {Object} options Additional options for parser and processors
+		 * 
+		 * @return {AbbreviationNode}
+		 */
+		parse: function(abbr, options) {
+			options = options || {};
+			
+			var tree = parseAbbreviation(abbr);
+			
+			if (options.contextNode) {
+				// add info about context node –
+				// a parent XHTML node in editor inside which abbreviation is 
+				// expanded
+				tree._name = options.contextNode.name;
+				var attrLookup = {};
+				_.each(tree._attributes, function(attr) {
+					attrLookup[attr.name] = attr;
+				});
+				
+				_.each(options.contextNode.attributes, function(attr) {
+					if (attr.name in attrLookup) {
+						attrLookup[attr.name].value = attr.value;
+					} else {
+						attr = _.clone(attr);
+						tree._attributes.push(attr);
+						attrLookup[attr.name] = attr;
+					}
+				});
+			}
+			
+			
+			// apply preprocessors
+			_.each(preprocessors, function(fn) {
+				fn(tree, options);
+			});
+			
+			tree = squash(unroll(tree));
+			
+			// apply postprocessors
+			_.each(postprocessors, function(fn) {
+				fn(tree, options);
+			});
+			
+			return tree;
+		},
+		
+		AbbreviationNode: AbbreviationNode,
+		
+		/**
+		 * Add new abbreviation preprocessor. <i>Preprocessor</i> is a function
+		 * that applies to a parsed abbreviation tree right after it get parsed.
+		 * The passed tree is in unoptimized state.
+		 * @param {Function} fn Preprocessor function. This function receives
+		 * two arguments: parsed abbreviation tree (<code>AbbreviationNode</code>)
+		 * and <code>options</code> hash that was passed to <code>parse</code>
+		 * method
+		 */
+		addPreprocessor: function(fn) {
+			if (!_.include(preprocessors, fn))
+				preprocessors.push(fn);
+		},
+		
+		/**
+		 * Removes registered preprocessor
+		 */
+		removeFilter: function(fn) {
+			preprocessor = _.without(preprocessors, fn);
+		},
+		
+		/**
+		 * Adds new abbreviation postprocessor. <i>Postprocessor</i> is a 
+		 * functinon that applies to <i>optimized</i> parsed abbreviation tree
+		 * right before it returns from <code>parse()</code> method
+		 * @param {Function} fn Postprocessor function. This function receives
+		 * two arguments: parsed abbreviation tree (<code>AbbreviationNode</code>)
+		 * and <code>options</code> hash that was passed to <code>parse</code>
+		 * method
+		 */
+		addPostprocessor: function(fn) {
+			if (!_.include(postprocessors, fn))
+				postprocessors.push(fn);
+		},
+		
+		/**
+		 * Removes registered postprocessor function
+		 */
+		removePostprocessor: function(fn) {
+			postprocessors = _.without(postprocessors, fn);
+		},
+		
+		/**
+		 * Registers output postprocessor. <i>Output processor</i> is a 
+		 * function that applies to output part (<code>start</code>, 
+		 * <code>end</code> and <code>content</code>) when 
+		 * <code>AbbreviationNode.toString()</code> method is called
+		 */
+		addOutputProcessor: function(fn) {
+			if (!_.include(outputProcessors, fn))
+				outputProcessors.push(fn);
+		},
+		
+		/**
+		 * Removes registered output processor
+		 */
+		removeOutputProcessor: function(fn) {
+			outputProcessors = _.without(outputProcessors, fn);
+		},
+		
+		/**
+		 * Check if passed symbol is valid symbol for abbreviation expression
+		 * @param {String} ch
+		 * @return {Boolean}
+		 */
+		isAllowedChar: function(ch) {
+			ch = String(ch); // convert Java object to JS
+			return isAllowedChar(ch) || ~'>+^[](){}'.indexOf(ch);
+		}
+	};
+});/**
+ * Processor function that matches parsed <code>AbbreviationNode</code>
+ * against resources defined in <code>resource</code> module
+ * @param {Function} require
+ * @param {Underscore} _
+ */ 
+zen_coding.exec(function(require, _) {
+	/**
+	 * Finds matched resources for child nodes of passed <code>node</code> 
+	 * element. A matched resource is a reference to <i>snippets.json</i> entry
+	 * that describes output of parsed node 
+	 * @param {AbbreviationNode} node
+	 * @param {String} syntax
+	 */
+	function matchResources(node, syntax) {
+		var resources = require('resources');
+		var elements = require('elements');
+		var parser = require('abbreviationParser');
+		
+		// do a shallow copy because the children list can be modified during
+		// resource matching
+		_.each(_.clone(node.children), function(child) {
+			var r = resources.getMatchedResource(child, syntax);
+			if (_.isString(r)) {
+				child.data('resource', elements.create('snippet', r));
+			} else if (elements.is(r, 'reference')) {
+				// it’s a reference to another abbreviation:
+				// parse it and insert instead of current child
+				var subtree = parser.parse(r.data, {
+					syntax: syntax
+				});
+				
+				// move child‘s children into the deepest child of new subtree
+				var deepestChild = subtree.deepestChild();
+				if (deepestChild) {
+					_.each(child.children, function(c) {
+						deepestChild.addChild(c);
+					});
+				}
+				child.replace(subtree.children);
+			} else {
+				child.data('resource', r);
+			}
+			
+			matchResources(child, syntax);
+		});
+	}
+	
+	// XXX register abbreviation filter that creates references to resources
+	// on abbreviation nodes
+	/**
+	 * @param {AbbreviationNode} tree
+	 */
+	require('abbreviationParser').addPreprocessor(function(tree, options) {
+		var syntax = options.syntax || zen_coding.defaultSyntax();
+		matchResources(tree, syntax);
+	});
+	
+});/**
+ * Pasted content abbreviation processor. A pasted content is a content that
+ * should be inserted into implicitly repeated abbreviation nodes.
+ * This processor powers “Wrap With Abbreviation” action
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.exec(function(require, _) {
+	var parser = require('abbreviationParser');
+	var outputPlaceholder = '$#';
+	
+	/**
+	 * Locates output placeholders inside text
+	 * @param {String} text
+	 * @returns {Array} Array of ranges of output placeholder in text
+	 */
+	function locateOutputPlaceholder(text) {
+		var range = require('range');
+		var result = [];
+		
+		/** @type StringStream */
+		var stream = require('stringStream').create(text);
+		
+		while (!stream.eol()) {
+			if (stream.peek() == '\\') {
+				stream.next();
+			} else {
+				stream.start = stream.pos;
+				if (stream.match(outputPlaceholder, true)) {
+					result.push(range.create(stream.start, outputPlaceholder));
+					continue;
+				}
+			}
+			stream.next();
+		}
+		
+		return result;
+	}
+	
+	/**
+	 * Replaces output placeholders inside <code>source</code> with 
+	 * <code>value</code>
+	 * @param {String} source
+	 * @param {String} value
+	 * @returns {String}
+	 */
+	function replaceOutputPlaceholders(source, value) {
+		var utils = require('utils');
+		var ranges = locateOutputPlaceholder(source);
+		
+		ranges.reverse();
+		_.each(ranges, function(r) {
+			source = utils.replaceSubstring(source, value, r);
+		});
+		
+		return source;
+	}
+	
+	/**
+	 * Check if parsed node contains output placeholder – a target where
+	 * pasted content should be inserted
+	 * @param {AbbreviationNode} node
+	 * @returns {Boolean}
+	 */
+	function hasOutputPlaceholder(node) {
+		if (locateOutputPlaceholder(node.content).length)
+			return true;
+		
+		// check if attributes contains placeholder
+		return !!_.find(node.attributeList(), function(attr) {
+			return !!locateOutputPlaceholder(attr.value).length;
+		});
+	}
+	
+	/**
+	 * Insert pasted content into correct positions of parsed node
+	 * @param {AbbreviationNode} node
+	 * @param {String} content
+	 */
+	function insertPastedContent(node, content) {
+		var nodesWithPlaceholders = node.findAll(function(item) {
+			return hasOutputPlaceholder(item);
+		});
+		
+		if (hasOutputPlaceholder(node))
+			nodesWithPlaceholders.unshift(node);
+		
+		if (nodesWithPlaceholders.length) {
+			_.each(nodesWithPlaceholders, function(item) {
+				item.content = replaceOutputPlaceholders(item.content, content);
+				_.each(item._attributes, function(attr) {
+					attr.value = replaceOutputPlaceholders(attr.value, content);
+				});
+			});
+		} else {
+			// on output placeholders in subtree, insert content in the deepest
+			// child node
+			var deepest = node.deepestChild() || node;
+			deepest.content = require('abbreviationUtils').insertChildContent(deepest.content, content);
+		}
+	}
+	
+	/**
+	 * @param {AbbreviationNode} tree
+	 * @param {Object} options
+	 */
+	parser.addPreprocessor(function(tree, options) {
+		if (options.pastedContent) {
+			var lines = require('utils').splitByLines(options.pastedContent, true);
+			// set repeat count for implicitly repeated elements before
+			// tree is unrolled
+			tree.findAll(function(item) {
+				if (item.hasImplicitRepeat) {
+					// TODO replace $# tokens
+//					(item.deepestChild() || item).data('paste', lines);
+					item.data('paste', lines);
+					return item.repeatCount = lines.length;
+				}
+			});
+		}
+	});
+	
+	/**
+	 * @param {AbbreviationNode} tree
+	 * @param {Object} options
+	 */
+	parser.addPostprocessor(function(tree, options) {
+		// for each node with pasted content, update text data
+		var targets = tree.findAll(function(item) {
+			var pastedContentObj = item.data('paste');
+			var pastedContent = '';
+			if (_.isArray(pastedContentObj)) {
+				pastedContent = pastedContentObj[item.counter - 1];
+			} else if (_.isFunction(pastedContentObj)) {
+				pastedContent = pastedContentObj(item.counter - 1, item.content);
+			} else if (pastedContentObj) {
+				pastedContent = pastedContentObj;
+			}
+			
+			if (pastedContent) {
+				insertPastedContent(item, pastedContent);
+			}
+			
+			item.data('paste', null);
+			return !_.isUndefined(pastedContentObj);
+		});
+		
+		if (!targets.length && options.pastedContent) {
+			// no implicitly repeated elements, put pasted content in
+			// the deepest child
+			insertPastedContent(tree, options.pastedContent);
+		}
+	});
+});/**
+ * Resolves tag names in abbreviations with implied name
+ */
+zen_coding.exec(function(require, _) {
+	/**
+	 * Resolves implicit node names in parsed tree
+	 * @param {ZenNode} tree
+	 */
+	function resolveNodeNames(tree) {
+		var tagName = require('tagName');
+		_.each(tree.children, function(node) {
+			if (node.hasImplicitName() || node.data('forceNameResolving')) {
+				node._name = tagName.resolve(node.parent.name());
+			}
+			resolveNodeNames(node);
+		});
+		
+		return tree;
+	}
+	
+	require('abbreviationParser').addPostprocessor(resolveNodeNames);
+});/**
+ * @author Stoyan Stefanov
+ * @link https://github.com/stoyan/etc/tree/master/cssex
+ */
+
+zen_coding.define('cssParser', function(require, _) {
+var walker, tokens = [], isOp, isNameChar, isDigit;
+    
+    // walks around the source
+    walker = {
+        lines: null,
+        total_lines: 0,
+        linenum: -1,
+        line: '',
+        ch: '',
+        chnum: -1,
+        init: function (source) {
+            var me = walker;
+        
+            // source, yumm
+            me.lines = source
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .split('\n');
+            me.total_lines = me.lines.length;
+        
+            // reset
+            me.chnum = -1;
+            me.linenum = -1;
+            me.ch = '';
+            me.line = '';
+        
+            // advance
+            me.nextLine();
+            me.nextChar();
+        },
+        nextLine: function () {
+            var me = this;
+            me.linenum += 1;
+            if (me.total_lines <= me.linenum) {
+                me.line = false;
+            } else {
+                me.line = me.lines[me.linenum];
+            }
+            if (me.chnum !== -1) {
+                me.chnum = 0;
+            }
+            return me.line;
+        }, 
+        nextChar: function () {
+            var me = this;
+            me.chnum += 1;
+            while (me.line.charAt(me.chnum) === '') {
+                if (this.nextLine() === false) {
+                    me.ch = false;
+                    return false; // end of source
+                }
+                me.chnum = -1;
+                me.ch = '\n';
+                return '\n';
+            }
+            me.ch = me.line.charAt(me.chnum);
+            return me.ch;
+        },
+        peek: function() {
+            return this.line.charAt(this.chnum + 1);
+        }
+    };
+
+    // utility helpers
+    isNameChar = function (c) {
+        return (c === '_' || c === '-' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+    };
+
+    isDigit = function (ch) {
+        return (ch !== false && ch >= '0' && ch <= '9');
+    };  
+
+    isOp = (function () {
+        var opsa = "{}[]()+*=.,;:>~|\\%$#@^!".split(''),
+            opsmatcha = "*^|$~".split(''),
+            ops = {},
+            opsmatch = {},
+            i = 0;
+        for (; i < opsa.length; i += 1) {
+            ops[opsa[i]] = true;
+        }
+        for (i = 0; i < opsmatcha.length; i += 1) {
+            opsmatch[opsmatcha[i]] = true;
+        }
+        return function (ch, matchattr) {
+            if (matchattr) {
+                return !!opsmatch[ch];
+            }
+            return !!ops[ch];
+        };
+    }());
+    
+    // shorthands
+    function isset(v) {
+        return typeof v !== 'undefined';
+    }
+    function getConf() {
+        return {
+            'char': walker.chnum,
+            line: walker.linenum
+        };
+    }
+
+
+    // creates token objects and pushes them to a list
+    function tokener(value, type, conf) {
+        var w = walker, c = conf || {};
+        tokens.push({
+            charstart: isset(c['char']) ? c['char'] : w.chnum,
+            charend:   isset(c.charend) ? c.charend : w.chnum,
+            linestart: isset(c.line)    ? c.line    : w.linenum,
+            lineend:   isset(c.lineend) ? c.lineend : w.linenum,
+            value:     value,
+            type:      type || value
+        });
+    }
+    
+    // oops
+    function error(m, config) { 
+        var w = walker,
+            conf = config || {},
+            c = isset(conf['char']) ? conf['char'] : w.chnum,
+            l = isset(conf.line) ? conf.line : w.linenum;
+        return {
+            name: "ParseError",
+            message: m + " at line " + (l + 1) + ' char ' + (c + 1),
+            walker: w,
+            tokens: tokens
+        };
+    }
+
+
+    // token handlers follow for:
+    // white space, comment, string, identifier, number, operator
+    function white() {
+    
+        var c = walker.ch,
+            token = '',
+            conf = getConf();
+    
+        while (c === " " || c === "\t") {
+            token += c;
+            c = walker.nextChar();
+        }
+    
+        tokener(token, 'white', conf);
+    
+    }
+
+    function comment() {
+    
+        var w = walker,
+            c = w.ch,
+            token = c,
+            cnext,
+            conf = getConf();    
+     
+        cnext = w.nextChar();
+        
+        if (cnext !== '*') {
+            // oops, not a comment, just a /
+            conf.charend = conf['char'];
+            conf.lineend = conf.line;
+            return tokener(token, token, conf);
+        }
+    
+        while (!(c === "*" && cnext === "/")) {
+            token += cnext;
+            c = cnext;
+            cnext = w.nextChar();        
+        }
+        token += cnext;
+        w.nextChar();
+        tokener(token, 'comment', conf);
+    }
+
+    function str() {
+        var w = walker,
+            c = w.ch,
+            q = c,
+            token = c,
+            cnext,
+            conf = getConf();
+    
+        c = w.nextChar();
+    
+        while (c !== q) {
+            
+            if (c === '\n') {
+                cnext = w.nextChar();
+                if (cnext === "\\") {
+                    token += c + cnext;
+                } else {
+                    // end of line with no \ escape = bad
+                    throw error("Unterminated string", conf);
+                }
+            } else {
+                if (c === "\\") {
+                    token += c + w.nextChar();
+                } else {
+                    token += c;
+                }
+            }
+        
+            c = w.nextChar();
+        
+        }
+        token += c;
+        w.nextChar();
+        tokener(token, 'string', conf);
+    }
+    
+    function brace() {
+        var w = walker,
+            c = w.ch,
+            depth = 0,
+            token = c,
+            conf = getConf();
+    
+        c = w.nextChar();
+    
+        while (c !== ')' && !depth) {
+        	if (c === '(') {
+        		depth++;
+        	} else if (c === ')') {
+        		depth--;
+        	} else if (c === false) {
+        		throw error("Unterminated brace", conf);
+        	}
+        	
+        	token += c;
+            c = w.nextChar();
+        }
+        
+        token += c;
+        w.nextChar();
+        tokener(token, 'brace', conf);
+    }
+
+    function identifier(pre) {
+        var w = walker,
+            c = w.ch,
+            conf = getConf(),
+            token = (pre) ? pre + c : c;
+            
+        c = w.nextChar();
+    
+        if (pre) { // adjust token position
+        	conf['char'] -= pre.length;
+        }
+        
+        while (isNameChar(c) || isDigit(c)) {
+            token += c;
+            c = w.nextChar();
+        }
+    
+        tokener(token, 'identifier', conf);    
+    }
+
+    function num() {
+        var w = walker,
+            c = w.ch,
+            conf = getConf(),
+            token = c,
+            point = token === '.',
+            nondigit;
+        
+        c = w.nextChar();
+        nondigit = !isDigit(c);
+    
+        // .2px or .classname?
+        if (point && nondigit) {
+            // meh, NaN, could be a class name, so it's an operator for now
+            conf.charend = conf['char'];
+            conf.lineend = conf.line;
+            return tokener(token, '.', conf);    
+        }
+        
+        // -2px or -moz-something
+        if (token === '-' && nondigit) {
+            return identifier('-');
+        }
+    
+        while (c !== false && (isDigit(c) || (!point && c === '.'))) { // not end of source && digit or first instance of .
+            if (c === '.') {
+                point = true;
+            }
+            token += c;
+            c = w.nextChar();
+        }
+
+        tokener(token, 'number', conf);    
+    
+    }
+
+    function op() {
+        var w = walker,
+            c = w.ch,
+            conf = getConf(),
+            token = c,
+            next = w.nextChar();
+            
+        if (next === "=" && isOp(token, true)) {
+            token += next;
+            tokener(token, 'match', conf);
+            w.nextChar();
+            return;
+        } 
+        
+        conf.charend = conf['char'] + 1;
+        conf.lineend = conf.line;    
+        tokener(token, token, conf);
+    }
+
+
+    // call the appropriate handler based on the first character in a token suspect
+    function tokenize() {
+
+        var ch = walker.ch;
+    
+        if (ch === " " || ch === "\t") {
+            return white();
+        }
+
+        if (ch === '/') {
+            return comment();
+        } 
+
+        if (ch === '"' || ch === "'") {
+            return str();
+        }
+        
+        if (ch === '(') {
+            return brace();
+        }
+    
+        if (ch === '-' || ch === '.' || isDigit(ch)) { // tricky - char: minus (-1px) or dash (-moz-stuff)
+            return num();
+        }
+    
+        if (isNameChar(ch)) {
+            return identifier();
+        }
+
+        if (isOp(ch)) {
+            return op();
+        }
+        
+        if (ch === "\n") {
+            tokener("line");
+            walker.nextChar();
+            return;
+        }
+        
+        throw error("Unrecognized character");
+    }
+    
+    /**
+	 * Returns newline character at specified position in content
+	 * @param {String} content
+	 * @param {Number} pos
+	 * @return {String}
+	 */
+	function getNewline(content, pos) {
+		return content.charAt(pos) == '\r' && content.charAt(pos + 1) == '\n' 
+			? '\r\n' 
+			: content.charAt(pos);
+	}
+
+    return {
+    	/**
+    	 * @param source
+    	 * @returns
+    	 * @memberOf zen_coding.cssParser
+    	 */
+        lex: function (source) {
+            walker.init(source);
+            tokens = [];
+            while (walker.ch !== false) {
+                tokenize();            
+            }
+            return tokens;
+        },
+        
+        /**
+         * Tokenizes CSS source
+         * @param {String} source
+         * @returns {Array}
+         */
+        parse: function(source) {
+        	// transform tokens
+	 		var pos = 0;
+	 		return _.map(this.lex(source), function(token) {
+	 			if (token.type == 'line') {
+	 				token.value = getNewline(source, pos);
+	 			}
+	 			
+	 			return {
+	 				type: token.type,
+	 				start: pos,
+	 				end: (pos += token.value.length)
+	 			};
+			});
+		},
+        
+        toSource: function (toks) {
+            var i = 0, max = toks.length, t, src = '';
+            for (; i < max; i += 1) {
+                t = toks[i];
+                if (t.type === 'line') {
+                    src += '\n';
+                } else {
+                    src += t.value;
+                }
+            }
+            return src;
+        }
+    };
+});/**
+ * HTML tokenizer by Marijn Haverbeke
+ * http://codemirror.net/
+ * @constructor
+ * @memberOf __xmlParseDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('xmlParser', function(require, _) {
+	var Kludges = {
+		autoSelfClosers : {},
+		implicitlyClosed : {},
+		contextGrabbers : {},
+		doNotIndent : {},
+		allowUnquoted : true,
+		allowMissing : true
+	};
+
+	// Return variables for tokenizers
+	var tagName = null, type = null;
+
+	function inText(stream, state) {
+		function chain(parser) {
+			state.tokenize = parser;
+			return parser(stream, state);
+		}
+
+		var ch = stream.next();
+		if (ch == "<") {
+			if (stream.eat("!")) {
+				if (stream.eat("[")) {
+					if (stream.match("CDATA["))
+						return chain(inBlock("atom", "]]>"));
+					else
+						return null;
+				} else if (stream.match("--"))
+					return chain(inBlock("comment", "-->"));
+				else if (stream.match("DOCTYPE", true, true)) {
+					stream.eatWhile(/[\w\._\-]/);
+					return chain(doctype(1));
+				} else
+					return null;
+			} else if (stream.eat("?")) {
+				stream.eatWhile(/[\w\._\-]/);
+				state.tokenize = inBlock("meta", "?>");
+				return "meta";
+			} else {
+				type = stream.eat("/") ? "closeTag" : "openTag";
+				stream.eatSpace();
+				tagName = "";
+				var c;
+				while ((c = stream.eat(/[^\s\u00a0=<>\"\'\/?]/)))
+					tagName += c;
+				state.tokenize = inTag;
+				return "tag";
+			}
+		} else if (ch == "&") {
+			var ok;
+			if (stream.eat("#")) {
+				if (stream.eat("x")) {
+					ok = stream.eatWhile(/[a-fA-F\d]/) && stream.eat(";");
+				} else {
+					ok = stream.eatWhile(/[\d]/) && stream.eat(";");
+				}
+			} else {
+				ok = stream.eatWhile(/[\w\.\-:]/) && stream.eat(";");
+			}
+			return ok ? "atom" : "error";
+		} else {
+			stream.eatWhile(/[^&<]/);
+			return "text";
+		}
+	}
+
+	function inTag(stream, state) {
+		var ch = stream.next();
+		if (ch == ">" || (ch == "/" && stream.eat(">"))) {
+			state.tokenize = inText;
+			type = ch == ">" ? "endTag" : "selfcloseTag";
+			return "tag";
+		} else if (ch == "=") {
+			type = "equals";
+			return null;
+		} else if (/[\'\"]/.test(ch)) {
+			state.tokenize = inAttribute(ch);
+			return state.tokenize(stream, state);
+		} else {
+			stream.eatWhile(/[^\s\u00a0=<>\"\'\/?]/);
+			return "word";
+		}
+	}
+
+	function inAttribute(quote) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.next() == quote) {
+					state.tokenize = inTag;
+					break;
+				}
+			}
+			return "string";
+		};
+	}
+
+	function inBlock(style, terminator) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.match(terminator)) {
+					state.tokenize = inText;
+					break;
+				}
+				stream.next();
+			}
+			return style;
+		};
+	}
+	
+	function doctype(depth) {
+		return function(stream, state) {
+			var ch;
+			while ((ch = stream.next()) != null) {
+				if (ch == "<") {
+					state.tokenize = doctype(depth + 1);
+					return state.tokenize(stream, state);
+				} else if (ch == ">") {
+					if (depth == 1) {
+						state.tokenize = inText;
+						break;
+					} else {
+						state.tokenize = doctype(depth - 1);
+						return state.tokenize(stream, state);
+					}
+				}
+			}
+			return "meta";
+		};
+	}
+
+	var curState = null, setStyle;
+	function pass() {
+		for (var i = arguments.length - 1; i >= 0; i--)
+			curState.cc.push(arguments[i]);
+	}
+	
+	function cont() {
+		pass.apply(null, arguments);
+		return true;
+	}
+
+	function pushContext(tagName, startOfLine) {
+		var noIndent = Kludges.doNotIndent.hasOwnProperty(tagName) 
+			|| (curState.context && curState.context.noIndent);
+		curState.context = {
+			prev : curState.context,
+			tagName : tagName,
+			indent : curState.indented,
+			startOfLine : startOfLine,
+			noIndent : noIndent
+		};
+	}
+	
+	function popContext() {
+		if (curState.context)
+			curState.context = curState.context.prev;
+	}
+
+	function element(type) {
+		if (type == "openTag") {
+			curState.tagName = tagName;
+			return cont(attributes, endtag(curState.startOfLine));
+		} else if (type == "closeTag") {
+			var err = false;
+			if (curState.context) {
+				if (curState.context.tagName != tagName) {
+					if (Kludges.implicitlyClosed.hasOwnProperty(curState.context.tagName.toLowerCase())) {
+						popContext();
+					}
+					err = !curState.context || curState.context.tagName != tagName;
+				}
+			} else {
+				err = true;
+			}
+			
+			if (err)
+				setStyle = "error";
+			return cont(endclosetag(err));
+		}
+		return cont();
+	}
+	
+	function endtag(startOfLine) {
+		return function(type) {
+			if (type == "selfcloseTag"
+					|| (type == "endTag" && Kludges.autoSelfClosers
+							.hasOwnProperty(curState.tagName
+									.toLowerCase()))) {
+				maybePopContext(curState.tagName.toLowerCase());
+				return cont();
+			}
+			if (type == "endTag") {
+				maybePopContext(curState.tagName.toLowerCase());
+				pushContext(curState.tagName, startOfLine);
+				return cont();
+			}
+			return cont();
+		};
+	}
+	
+	function endclosetag(err) {
+		return function(type) {
+			if (err)
+				setStyle = "error";
+			if (type == "endTag") {
+				popContext();
+				return cont();
+			}
+			setStyle = "error";
+			return cont(arguments.callee);
+		};
+	}
+	
+	function maybePopContext(nextTagName) {
+		var parentTagName;
+		while (true) {
+			if (!curState.context) {
+				return;
+			}
+			parentTagName = curState.context.tagName.toLowerCase();
+			if (!Kludges.contextGrabbers.hasOwnProperty(parentTagName)
+					|| !Kludges.contextGrabbers[parentTagName].hasOwnProperty(nextTagName)) {
+				return;
+			}
+			popContext();
+		}
+	}
+
+	function attributes(type) {
+		if (type == "word") {
+			setStyle = "attribute";
+			return cont(attribute, attributes);
+		}
+		if (type == "endTag" || type == "selfcloseTag")
+			return pass();
+		setStyle = "error";
+		return cont(attributes);
+	}
+	
+	function attribute(type) {
+		if (type == "equals")
+			return cont(attvalue, attributes);
+		if (!Kludges.allowMissing)
+			setStyle = "error";
+		return (type == "endTag" || type == "selfcloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvalue(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		if (type == "word" && Kludges.allowUnquoted) {
+			setStyle = "string";
+			return cont();
+		}
+		setStyle = "error";
+		return (type == "endTag" || type == "selfCloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvaluemaybe(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		else
+			return pass();
+	}
+	
+	function startState() {
+		return {
+			tokenize : inText,
+			cc : [],
+			indented : 0,
+			startOfLine : true,
+			tagName : null,
+			context : null
+		};
+	}
+	
+	function token(stream, state) {
+		if (stream.sol()) {
+			state.startOfLine = true;
+			state.indented = 0;
+		}
+		
+		if (stream.eatSpace())
+			return null;
+
+		setStyle = type = tagName = null;
+		var style = state.tokenize(stream, state);
+		state.type = type;
+		if ((style || type) && style != "comment") {
+			curState = state;
+			while (true) {
+				var comb = state.cc.pop() || element;
+				if (comb(type || style))
+					break;
+			}
+		}
+		state.startOfLine = false;
+		return setStyle || style;
+	}
+
+	return {
+		/**
+		 * @memberOf zen_coding.xmlParser
+		 * @returns
+		 */
+		parse: function(data, offset) {
+			offset = offset || 0;
+			var state = startState();
+			var stream = require('stringStream').create(data);
+			var tokens = [];
+			while (!stream.eol()) {
+				tokens.push({
+					type: token(stream, state),
+					start: stream.start + offset,
+					end: stream.pos + offset
+				});
+				stream.start = stream.pos;
+			}
+			
+			return tokens;
+		}		
+	};
+});
+/**
  * Utility module for Zen Coding
  * @param {Function} require
  * @param {Underscore} _
@@ -1252,7 +3171,7 @@ zen_coding.define('utils', function(require, _) {
 	 * Special token used as a placeholder for caret positions inside 
 	 * generated output 
 	 */
-	var caretPlaceholder = '{%::zen-caret::%}';
+	var caretPlaceholder = '${0}';
 	
 	/**
 	 * A simple string builder, optimized for faster text concatenation
@@ -1331,7 +3250,12 @@ zen_coding.define('utils', function(require, _) {
 		 * @returns {String}
 		 */
 		getNewline: function() {
-			var nl = require('resources').getVariable('newline');
+			var res = require('resources');
+			if (!res) {
+				return '\n';
+			}
+			
+			var nl = res.getVariable('newline');
 			return _.isString(nl) ? nl : '\n';
 		},
 		
@@ -1349,7 +3273,7 @@ zen_coding.define('utils', function(require, _) {
 		 * Split text into lines. Set <code>remove_empty</code> to true to filter
 		 * empty lines
 		 * @param {String} text Text to split
-		 * @param {Boolean} remove_empty Remove empty lines from result
+		 * @param {Boolean} removeEmpty Remove empty lines from result
 		 * @return {Array}
 		 */
 		splitByLines: function(text, removeEmpty) {
@@ -1365,10 +3289,9 @@ zen_coding.define('utils', function(require, _) {
 				.split(nl);
 			
 			if (removeEmpty) {
-				var that = this;
-				_.filter(lines, function(line) {
-					return !!that.trim(line);
-				});
+				lines = _.filter(lines, function(line) {
+					return line.length && !!this.trim(line);
+				}, this);
 			}
 			
 			return lines;
@@ -1516,17 +3439,19 @@ zen_coding.define('utils', function(require, _) {
 			};
 			
 			var res = require('resources');
-			return str.replace(/\$\{([a-z_\-][\w\-]*)\}/g, function(str, p1) {
-				var newValue = resolver(str, p1);
-				if (newValue === null) {
-					// try to find variable in zen_settings
-					newValue = res.getVariable(p1);
+			return require('tabStops').processText(str, {
+				variable: function(data) {
+					var newValue = resolver(data.token, data.name, data);
+					if (newValue === null) {
+						// try to find variable in zen_settings
+						newValue = res.getVariable(data.name);
+					}
+					
+					if (newValue === null || _.isUndefined(newValue))
+						// nothing found, return token itself
+						newValue = data.token;
+					return newValue;
 				}
-				
-				if (newValue === null || _.isUndefined(newValue))
-					// nothing found, return token itself
-					newValue = str;
-				return newValue;
 			});
 		},
 		
@@ -1614,6 +3539,18 @@ zen_coding.define('utils', function(require, _) {
 		},
 		
 		/**
+		 * Helper function that returns padding of line of <code>pos</code>
+		 * position in <code>content</code>
+		 * @param {String} content
+		 * @param {Number} pos
+		 * @returns {String}
+		 */
+		getLinePaddingFromPosition: function(content, pos) {
+			var lineRange = this.findNewlineBounds(content, pos);
+			return this.getLinePadding(lineRange.substring(content));
+		},
+		
+		/**
 		 * Escape special regexp chars in string, making it usable for creating dynamic
 		 * regular expressions
 		 * @param {String} str
@@ -1660,8 +3597,14 @@ zen_coding.define('utils', function(require, _) {
 				start = start.start;
 			}
 			
+			if (_.isString(end))
+				end = start + end.length;
+			
 			if (_.isUndefined(end))
 				end = start;
+			
+			if (start < 0 || start > str.length)
+				return str;
 			
 			return str.substring(0, start) + value + str.substring(end);
 		},
@@ -2455,6 +4398,17 @@ zen_coding.define('resources', function(require, _) {
 	}
 	
 	/**
+	 * Normalizes caret plceholder in passed text: replaces | character with
+	 * default caret placeholder
+	 * @param {String} text
+	 * @returns {String}
+	 */
+	function normalizeCaretPlaceholder(text) {
+		var utils = require('utils');
+		return utils.replaceUnescapedSymbol(text, '|', utils.getCaretPlaceholder());
+	}
+	
+	/**
 	 * Returns parsed item located in specified vocabulary by its syntax and
 	 * name
 	 * @param {String} vocabulary Resource vocabulary
@@ -2472,14 +4426,14 @@ zen_coding.define('resources', function(require, _) {
 			res = chain[i];
 			if (item in res) {
 				if (!isParsed(res[item])) {
+					var value = normalizeCaretPlaceholder(res[item]);
 					switch(name) {
 						case 'abbreviations':
-							var value = res[item];
 							res[item] = parseAbbreviation(item, value);
 							res[item].__ref = value;
 							break;
 						case 'snippets':
-							res[item] = elements.create('snippet', res[item]);
+							res[item] = elements.create('snippet', value);
 							break;
 					}
 					
@@ -2517,7 +4471,7 @@ zen_coding.define('resources', function(require, _) {
 		 * Sets new unparsed data for specified settings vocabulary
 		 * @param {Object} data
 		 * @param {String} type Vocabulary type ('system' or 'user')
-		 * @memberOf zen_coding.resources
+		 * @memberOf resources
 		 */
 		setVocabulary: function(data, type) {
 			if (type == VOC_SYSTEM)
@@ -2578,8 +4532,8 @@ zen_coding.define('resources', function(require, _) {
 		 */
 		getMatchedResource: function(node, syntax) {
 			return resolvers.exec(null, _.toArray(arguments)) 
-				|| this.getAbbreviation(syntax, node.name) 
-				|| this.getSnippet(syntax, node.name);
+				|| this.getAbbreviation(syntax, node.name()) 
+				|| this.getSnippet(syntax, node.name());
 		},
 		
 		/**
@@ -2818,8 +4772,8 @@ zen_coding.define('profile', function(require, _) {
 	var profiles = {};
 	
 	var defaultProfile = {
-		tag_case: 'lower',
-		attr_case: 'lower',
+		tag_case: 'asis',
+		attr_case: 'asis',
 		attr_quotes: 'double',
 		
 		// each tag on new line
@@ -2842,12 +4796,91 @@ zen_coding.define('profile', function(require, _) {
 	};
 	
 	/**
+	 * @constructor
+	 * @type OutputProfile
+	 * @param {Object} options
+	 */
+	function OutputProfile(options) {
+		_.extend(this, defaultProfile, options);
+	}
+	
+	OutputProfile.prototype = {
+		/**
+		 * Transforms tag name case depending on current profile settings
+		 * @param {String} name String to transform
+		 * @returns {String}
+		 */
+		tagName: function(name) {
+			return stringCase(name, this.tag_case);
+		},
+		
+		/**
+		 * Transforms attribute name case depending on current profile settings 
+		 * @param {String} name String to transform
+		 * @returns {String}
+		 */
+		attributeName: function(name) {
+			return stringCase(name, this.attr_case);
+		},
+		
+		/**
+		 * Returns quote character for current profile
+		 * @returns {String}
+		 */
+		attributeQuote: function() {
+			return this.attr_quotes == 'single' ? "'" : '"';
+		},
+		
+		/**
+		 * Returns self-closing tag symbol for current profile
+		 * @param {String} param
+		 * @returns {String}
+		 */
+		selfClosing: function(param) {
+			if (this.self_closing_tag == 'xhtml')
+				return ' /';
+			
+			if (this.self_closing_tag === true)
+				return '/';
+			
+			return '';
+		},
+		
+		/**
+		 * Returns cursor token based on current profile settings
+		 * @returns {String}
+		 */
+		cursor: function() {
+			return this.place_cursor ? require('utils').getCaretPlaceholder() : '';
+		}
+	};
+	
+	/**
+	 * Helper function that converts string case depending on 
+	 * <code>caseValue</code> 
+	 * @param {String} str String to transform
+	 * @param {String} caseValue Case value: can be <i>lower</i>, 
+	 * <i>upper</i> and <i>leave</i>
+	 * @returns {String}
+	 */
+	function stringCase(str, caseValue) {
+		switch (String(caseValue || '').toLowerCase()) {
+			case 'lower':
+				return str.toLowerCase();
+			case 'upper':
+				return str.toUpperCase();
+		}
+		
+		return str;
+	}
+	
+	/**
 	 * Creates new output profile
 	 * @param {String} name Profile name
 	 * @param {Object} options Profile options
 	 */
 	function createProfile(name, options) {
-		return profiles[name.toLowerCase()] = _.defaults(options || {}, defaultProfile);
+		return profiles[name.toLowerCase()] = new OutputProfile(options);
 	}
 	
 	// create default profiles
@@ -2914,24 +4947,17 @@ zen_coding.define('profile', function(require, _) {
 		 * <i>upper</i> and <i>leave</i>
 		 * @returns {String}
 		 */
-		stringCase: function(str, caseValue) {
-			switch (String(caseValue || '').toLowerCase()) {
-				case 'lower':
-					return str.toLowerCase();
-				case 'upper':
-					return str.toUpperCase();
-			}
-			
-			return str;
-		},
+		stringCase: stringCase,
 		
 		/**
 		 * Returns quote character based on profile parameter
 		 * @param {String} param Quote parameter, can be <i>single</i> or
 		 * <i>double</i>
 		 * @returns {String}
+		 * @deprecated
 		 */
 		quote: function(param) {
+			console.log('deprecated');
 			return param == 'single' ? "'" : '"';
 		},
 		
@@ -2939,8 +4965,10 @@ zen_coding.define('profile', function(require, _) {
 		 * Returns self-closing tag symbol, based on passed parameter
 		 * @param {String} param
 		 * @returns {String}
+		 * @deprecated
 		 */
 		selfClosing: function(param) {
+			console.log('deprecated');
 			if (param == 'xhtml')
 				return ' /';
 			
@@ -2948,226 +4976,6 @@ zen_coding.define('profile', function(require, _) {
 				return '/';
 			
 			return '';
-		}
-	};
-});/**
- * Module used to transform parsed abbreviation tree into a final 
- * <code>ZenNode</code> tree that will be used for output
- * @param {Function} require
- * @param {Underscore} _
- * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- */
-zen_coding.define('transform', function(require, _) {
-	/**
-	 * Resolves abbreviation node into parsed data
-	 * @param {TreeNode} node
-	 * @param {String} syntax
-	 * @returns {ParsedElement}
-	 */
-	function resolveNode(node, syntax) {
-		if (node.isEmpty()) return null;
-		
-		/** @type zen_coding.elements */
-		var elements = require('elements');
-		
-		var test = function(elem) {
-			if (_.isString(elem) || elements.is(elem, 'snippet'))
-				return elements.create('parsedSnippet', node, syntax, elem);
-			if (elements.is(elem, 'element'))
-				return elements.create('parsedElement', node, syntax, elem);
-			if (elements.is(elem, 'ZenNode'))
-				throw '"ZenNode" is internal class and should not be used by resolvers';
-			if (elements.is(elem, 'parsedElement') || elements.is(elem, 'parsedSnippet') || elements.is(elem, 'empty'))
-				return elem;
-			
-			return null;
-		};
-		
-		var result = require('resources').getMatchedResource(node, syntax);
-		// a little sugar here: if matched resource is a subtree (e.g. parsed
-		// abbreviation , like in 'expando' generator), retrieve children
-		// only for easier tree transform
-		if (elements.is(result, 'parsedElement') && result.isRoot) {
-			result = _.clone(result.children);
-		}
-		
-		if (_.isArray(result)) {
-			// received a set of elements, make sure it contains valid elements only
-			result = _.map(result, function(elem) {
-				var data = test(elem);
-				if (!data)
-					throw 'Elements list contains unparsed data';
-				
-				return data;
-			});
-			
-			return result;
-		}
-		
-		return test(result) || elements.create('parsedElement', node, syntax);
-	}
-	
-	/**
-	 * Process single tree node: expand it and its children 
-	 * @param {TreeNode} node
-	 * @param {String} syntax
-	 * @param {ParsedElement} parent
-	 */
-	function parseNodes(node, syntax, parent) {
-		var resolvedData = resolveNode(node, syntax);
-		/** @type zen_coding.elements */
-		var elements = require('elements');
-		
-		if (!resolvedData) 
-			return;
-		
-		_.each(_.isArray(resolvedData) ? resolvedData : [resolvedData], function(item) {
-			if (elements.is(item, 'empty')) // skip empty elements
-				return;
-			
-			parent.addChild(item);
-			
-			// set repeating element to the topmost node
-			var root = parent;
-			while (root.parent)
-				root = root.parent;
-			
-			root.last = item;
-			if (item.repeat_by_lines)
-				root.multiply_elem = item;
-				
-			// process child groups
-			_.each(node.children, function(child) {
-				parseNodes(child, syntax, item);
-			});
-		});
-	}
-	
-	/**
-	 * Resolves implicit node names in parsed tree
-	 * @param {ZenNode} tree
-	 */
-	function resolveNodeNames(tree) {
-		var tagName = require('tagName');
-		_.each(tree.children, function(node) {
-			if (node.hasImpliedName()) {
-				node.name = tagName.resolve(node.parent.name);
-			}
-			resolveNodeNames(node);
-		});
-		
-		return tree;
-	}
-	
-	return  {
-		/**
-		 * Transforms parsed abbreviation tree into final output tree 
-		 * @param {TreeNode} abbrTree Parsed abbreviation, returned by 
-		 * <code>zen_parser.parse</code>
-		 * @param {String} syntax
-		 * @param {TreeNode} contextNode Contextual node (XHTML under current 
-		 * caret position), for better abbreviation expansion
-		 * @returns {ZenNode}
-		 * @memberOf zen_coding.transform
-		 */
-		transform: function(abbrTree, syntax, contextNode) {
-			return this.rolloutTree(this.createParsedTree(abbrTree, syntax, contextNode));
-		},
-		
-		/**
-		 * Transforms abbreviation tree into parsed elements tree.
-		 * The parsed tree consists for resolved elements and snippets, defined 
-		 * in <code>zen_settings</code> file mostly. This is an intermediate tree
-		 * structure that can be used to produce final output tree.
-		 * @param {TreeNode} abbrTree Parsed abbreviation or abbreviation string 
-		 * (it will be parsed automatically)
-		 * @param {String} syntax
-		 * @param {TreeNode} contextNode Contextual node (XHTML element under current 
-		 * caret position), for better abbreviation expansion
-		 * @returns {ZenNode}
-		 * @returns {ParsedElement}
-		 */
-		createParsedTree: function(abbrTree, syntax, contextNode) {
-			var elems = require('elements');
-			var parser = require('abbreviationParser');
-			
-			/** @type ParsedElement */
-			var treeRoot = elems.create('parsedElement', contextNode || {}, syntax);
-			treeRoot.isRoot = true;
-			if (_.isString(abbrTree))
-				abbrTree = parser.parse(abbrTree);
-			
-			if (!abbrTree)
-				return null;
-			abbrTree = parser.optimizeTree(abbrTree);
-			
-			// recursively expand each group item
-			_.each(abbrTree.children, function(child) {
-				parseNodes(child, syntax, treeRoot);
-			});
-			
-			return treeRoot;
-		},
-
-		/**
-		 * Resolves abbreviation node into parsed data
-		 * @param {TreeNode} node
-		 * @param {String} syntax
-		 * @returns {ParsedElement}
-		 */
-		resolve: function(node, syntax) {
-			return resolveNode(node, syntax);
-		},
-		
-		/**
-		 * Rolls out basic Zen Coding tree into simplified, DOM-like tree.
-		 * The simplified tree, for example, represents each multiplied element 
-		 * as a separate element with its own content, if exists.
-		 * 
-		 * The simplified tree element contains some meta info (tag name, attributes, 
-		 * etc.) as well as output strings, which are exactly what will be outputted
-		 * after expanding abbreviation. This tree can be used for <i>filtering</i>:
-		 * you can apply filters that will alter output strings to get desired look
-		 * of expanded abbreviation.
-		 * 
-		 * @param {ParsedElement} tree
-		 * @param {ZenNode} parent
-		 */
-		rolloutTree: function(tree, parent) {
-			var elements = require('elements');
-			var utils = require('utils');
-			var howMany = 1;
-			var tagContent = '';
-			
-			parent = parent || elements.create('ZenNode', tree);
-			_.each(tree.children, function(child) {
-				howMany = child.count;
-				
-				if (child.repeat_by_lines) {
-					// it's a repeating element
-					tagContent = utils.splitByLines(child.getPasteContent(), true);
-					howMany = Math.max(tagContent.length, 1);
-				} else {
-					tagContent = child.getPasteContent();
-				}
-				
-				for (var j = 0; j < howMany; j++) {
-					var elem = elements.create('ZenNode', child);
-					parent.addChild(elem);
-					elem.counter = j + 1;
-					
-					if (child.hasChildren())
-						this.rolloutTree(child, elem);
-						
-					if (tagContent) {
-						var text = _.isString(tagContent) ? tagContent : tagContent[j];
-						elem.pasteContent(utils.trim(text || ''));
-					}
-				}
-			}, this);
-			
-			// make sure all elements has their names
-			return resolveNodeNames(parent);
 		}
 	};
 });/**
@@ -3182,19 +4990,11 @@ zen_coding.define('editorUtils', function(require, _) {
 		 * Returns context-aware node counter
 		 * @param {node} ZenNode
 		 * @return {Number}
-		 * @memberOf zen_coding.editorUtils
+		 * @memberOf editorUtils
 		 */
 		getCounterForNode: function(node) {
-			// find nearest repeating parent
-			var counter = node.counter;
-			if (!node.is_repeating && !node.repeat_by_lines) {
-				while (node = node.parent) {
-					if (node.is_repeating || node.repeat_by_lines)
-						return node.counter;
-				}
-			}
-			
-			return counter;
+			console.log('deprecated');
+			return node.counter;
 		},
 		
 		/**
@@ -3420,10 +5220,10 @@ zen_coding.define('actionUtils', function(require, _) {
 					var reAttr = /([\w\-:]+)(?:\s*=\s*(?:(?:"((?:\\.|[^"])*)")|(?:'((?:\\.|[^'])*)')|([^>\s]+)))?/g;
 					var startTag = tags[0];
 					var tagAttrs = startTag.full_tag.replace(/^<[\w\-\:]+/, '');
-					var parser = require('abbreviationParser');
-					/** @type TreeNode */
-					var contextNode = new parser.TreeNode;
-					contextNode.name = startTag.name;
+					var contextNode = {
+						name: startTag.name,
+						attributes: []
+					};
 					
 					// parse attributes
 					var m;
@@ -3481,6 +5281,115 @@ zen_coding.define('actionUtils', function(require, _) {
 			}
 			
 			return false;
+		}
+	};
+});/**
+ * Utility functions to work with <code>AbbreviationNode</code> as HTML element
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+zen_coding.define('abbreviationUtils', function(require, _) {
+	return {
+		/**
+		 * Check if passed abbreviation node has matched snippet resource
+		 * @param {AbbreviationNode} node
+		 * @returns {Boolean}
+		 * @memberOf abbreviationUtils
+		 */
+		isSnippet: function(node) {
+			return require('elements').is(node.matchedResource(), 'snippet');
+		},
+		
+		/**
+		 * Test if passed node is unary (no closing tag)
+		 * @param {AbbreviationNode} node
+		 * @return {Boolean}
+		 */
+		isUnary: function(node) {
+			var r = node.matchedResource();
+			if (node.children.length || this.isSnippet(node))
+				return false;
+			
+			return r && r.is_empty || require('tagName').isEmptyElement(node.name());
+		},
+		
+		/**
+		 * Test if passed node is inline-level (like &lt;strong&gt;, &lt;img&gt;)
+		 * @param {AbbreviationNode} node
+		 * @return {Boolean}
+		 */
+		isInline: function(node) {
+			return node.isTextNode() 
+				|| !node.name() 
+				|| require('tagName').isInlineLevel(node.name());
+		},
+		
+		/**
+		 * Test if passed node is block-level
+		 * @param {AbbreviationNode} node
+		 * @return {Boolean}
+		 */
+		isBlock: function(node) {
+			return require('elements').is(node.matchedResource(), 'snippet') 
+				|| !this.isInline(node);
+		},
+		
+		/**
+		 * This function tests if passed node content contains HTML tags. 
+		 * This function is mostly used for output formatting
+		 * @param {AbbreviationNode} node
+		 * @returns {Boolean}
+		 */
+		hasTagsInContent: function(node) {
+			return require('utils').matchesTag(node.content);
+		},
+		
+		/**
+		 * Test if current element contains block-level children
+		 * @param {AbbreviationNode} node
+		 * @return {Boolean}
+		 */
+		hasBlockChildren: function(node) {
+			return (this.hasTagsInContent(node) && this.isBlock(node)) 
+				|| _.any(node.children, function(child) {
+					return this.isBlock(child);
+				}, this);
+		},
+		
+		/**
+		 * Utility function that inserts content instead of <code>${child}</code>
+		 * variables on <code>text</code>
+		 * @param {String} text Text where child content should be inserted
+		 * @param {String} childContent Content to insert
+		 * @param {Object} options
+		 * @returns {String
+		 */
+		insertChildContent: function(text, childContent, options) {
+			options = _.extend({
+				keepVariable: true,
+				appendIfNoChild: true
+			}, options || {});
+			
+			var childVariableReplaced = false;
+			var utils = require('utils');
+			text = utils.replaceVariables(text, function(variable, name, data) {
+				var output = variable;
+				if (name == 'child') {
+					// add correct indentation
+					output = utils.padString(childContent, utils.getLinePaddingFromPosition(text, data.start));
+					childVariableReplaced = true;
+					if (options.keepVariable)
+						output += variable;
+				}
+				
+				return output;
+			});
+			
+			if (!childVariableReplaced && options.appendIfNoChild) {
+				text += childContent;
+			}
+			
+			return text;
 		}
 	};
 });/**
@@ -3890,15 +5799,49 @@ zen_coding.define('tabStops', function(require, _) {
 	 */
 	var startPlaceholderNum = 100;
 	
+	var tabstopIndex = 0;
+	
 	var defaultOptions = {
 		replaceCarets: true,
 		escape: function(ch) {
-			return ch;
+			return '\\' + ch;
 		},
 		tabstop: function(data) {
 			return data.token;
+		},
+		variable: function(data) {
+			return data.token;
 		}
 	};
+	
+	// XXX register output processor that will upgrade tabstops of parsed node
+	// in order to prevent tabstop index conflicts
+	require('abbreviationParser').addOutputProcessor(function(text, node, type) {
+		var maxNum = 0;
+		var tabstops = require('tabStops');
+		var utils = require('utils');
+		
+		// upgrade tabstops
+		text = tabstops.processText(text, {
+			tabstop: function(data) {
+				var group = parseInt(data.group);
+				if (group > maxNum) maxNum = group;
+				
+				if (data.placeholder)
+					return '${' + (group + tabstopIndex) + ':' + data.placeholder + '}';
+				else
+					return '${' + (group + tabstopIndex) + '}';
+			}
+		});
+		
+		// resolve variables
+		text = utils.replaceVariables(text, tabstops.variablesResolver(node));
+		
+		
+		tabstopIndex += maxNum + 1;
+		
+		return text;
+	});
 	
 	return {
 		/**
@@ -3921,6 +5864,11 @@ zen_coding.define('tabStops', function(require, _) {
 		 * <b>tabstop</b> : <code>Function</code> – a tabstop handler. Receives 
 		 * a single argument – an object describing token: its position, number 
 		 * group, placeholder and token itself. Should return a replacement 
+		 * string that will appear in final output
+		 * 
+		 * <b>variable</b> : <code>Function</code> – variable handler. Receives 
+		 * a single argument – an object describing token: its position, name 
+		 * and original token itself. Should return a replacement 
 		 * string that will appear in final output
 		 * 
 		 * @returns {Object} Object with processed <code>text</code> property
@@ -4034,6 +5982,13 @@ zen_coding.define('tabStops', function(require, _) {
 							group: stream.current().substr(1),
 							token: stream.current()
 						});
+					} else if (m = stream.match(/^\{([a-z_\-][\w\-]*)\}/)) {
+						// ${variable}
+						a = options.variable({
+							start: buf.length, 
+							name: m[1],
+							token: stream.current()
+						});
 					} else if (m = stream.match(/^\{([0-9]+)(:.+?)?\}/)) {
 						// ${N:value} or ${N} placeholder
 						var obj = {
@@ -4065,9 +6020,6 @@ zen_coding.define('tabStops', function(require, _) {
 		upgrade: function(node, offset) {
 			var maxNum = 0;
 			var options = {
-				escape: function(ch) {
-					return '\\' + ch;
-				},
 				tabstop: function(data) {
 					var group = parseInt(data.group);
 					if (group > maxNum) maxNum = group;
@@ -4075,7 +6027,7 @@ zen_coding.define('tabStops', function(require, _) {
 					if (data.placeholder)
 						return '${' + (group + offset) + ':' + data.placeholder + '}';
 					else
-						return '$' + (group + offset);
+						return '${' + (group + offset) + '}';
 				}
 			};
 			
@@ -4099,8 +6051,13 @@ zen_coding.define('tabStops', function(require, _) {
 			var placeholderMemo = {};
 			var res = require('resources');
 			return function(str, varName) {
-				var attr = node.getAttribute(varName);
-				if (attr !== null)
+				// do not mark `child` variable as placeholder – it‘s a reserved
+				// variable name
+				if (varName == 'child')
+					return str;
+				
+				var attr = node.attribute(varName);
+				if (!_.isUndefined(attr))
 					return attr;
 				
 				var varValue = res.getVariable(varName);
@@ -4116,6 +6073,25 @@ zen_coding.define('tabStops', function(require, _) {
 		},
 		
 		resetPlaceholderCounter: function() {
+			console.log('deprecated');
+			startPlaceholderNum = 100;
+		},
+		
+		/**
+		 * Resets global tabstop index. When parsed tree is converted to output
+		 * string (<code>AbbreviationNode.toString()</code>), all tabstops 
+		 * defined in snippets and elements are upgraded in order to prevent
+		 * naming conflicts of nested. For example, <code>${1}</code> of a node
+		 * should not be linked with the same placehilder of the child node.
+		 * By default, <code>AbbreviationNode.toString()</code> automatically
+		 * upgrades tabstops of the same index for each node and writes maximum
+		 * tabstop index into the <code>tabstopIndex</code> variable. To keep
+		 * this variable at reasonable value, it is recommended to call 
+		 * <code>resetTabstopIndex()</code> method each time you expand variable 
+		 * @returns
+		 */
+		resetTabstopIndex: function() {
+			tabstopIndex = 0;
 			startPlaceholderNum = 100;
 		}
 	};
@@ -4419,9 +6395,9 @@ zen_coding.define('elements', function(require, _) {
 		 * @param {String} name Element identifier
 		 * @param {Function} factory Function that produces element of specified 
 		 * type. The object generated by this factory is automatically 
-		 * augumented with <code>type</code> property pointing to element
+		 * augmented with <code>type</code> property pointing to element
 		 * <code>name</code>
-		 * @memberOf zen_coding.elements
+		 * @memberOf elements
 		 */
 		add: function(name, factory) {
 			var that = this;
@@ -4511,7 +6487,6 @@ zen_coding.define('elements', function(require, _) {
 	});
 	
 	result.add('snippet', commonFactory);
-	result.add('expando', commonFactory);
 	result.add('reference', commonFactory);
 	result.add('empty', function() {
 		return {};
@@ -4519,1854 +6494,6 @@ zen_coding.define('elements', function(require, _) {
 	
 	return result;
 });/**
- * Parsed element factory
- * @param {Function} require
- * @param {Underscore} _ 
- */
-zen_coding.exec(function(require, _) {
-	/**
-	 * Parsed element that represents intermediate node in abbreviation 
-	 * transformation process. This element will then be converted to 
-	 * <code>ZenNode</code>
-	 * 
-	 * @param {TreeNode} node Parsed tree node
-	 * @param {String} syntax Tag type (html, xml)
-	 * @param {DataElement} resource Matched element resource from <code>settings.json</code>
-	 * @param {Object} options Custom options dictionary. It will be inherited in
-	 * <code>ZenNode</code>
-	 */
-	function ParsedElement(node, syntax, resource, options) {
-		this._abbr = resource;
-		
-		this.name = this._abbr ? this._abbr.name : node.name;
-		this.real_name = node.name;
-		this.count = node.count || 1;
-		this.syntax = syntax;
-		this._content = '';
-		this._paste_content = '';
-		this.repeat_by_lines = !!node.is_repeating;
-		this.is_repeating = node && node.count > 1;
-		this.parent = null;
-		this.has_implicit_name = !!node.has_implict_name;
-		this.children = [];
-		this.options = _.extend({}, options || {});
-		
-		this.setContent(node.text);
-	}
-
-	ParsedElement.prototype = {
-		/**
-		 * Adds new child tag to current one
-		 * @param {ParsedElement} elem
-		 */
-		addChild: function(elem) {
-			elem.parent = this;
-			this.children.push(elem);
-		},
-		
-		/**
-		 * Check if current node contains children
-		 * @returns {Boolean}
-		 */
-		hasChildren: function() {
-			return !!this.children.length;
-		},
-		
-		/**
-		 * Adds new attribute
-		 * @param {String} name Attribute's name
-		 * @param {String} value Attribute's value
-		 */
-		addAttribute: function(name, value) {
-			if (!this.attributes)
-				this.attributes = [];
-				
-			if (!this._attr_hash)
-				this._attr_hash = {};
-			
-			/** @type {zen_coding.utils} */
-			var utils = require('utils');
-			
-			// escape pipe (caret) character with internal placeholder
-			value = utils.replaceUnescapedSymbol(value || '', '|', utils.getCaretPlaceholder());
-			
-			var a;
-			if (name in this._attr_hash) {
-				// attribute already exists, decide what to do
-				a = this._attr_hash[name];
-				if (name == 'class') {
-					// 'class' is a magic attribute
-					a.value += ((a.value) ? ' ' : '') + value;
-				} else {
-					a.value = value;
-				}
-			} else {
-				a = {name: name, value: value};
-				this._attr_hash[name] = a;
-				this.attributes.push(a);
-			}
-		},
-		
-		/**
-		 * Copy attributes from parsed node
-		 */
-		copyAttributes: function(node) {
-			if (node && node.attributes) {
-				var that = this;
-				_.each(node.attributes, function(attr) {
-					that.addAttribute(attr.name, attr.value);
-				});
-			}
-		},
-		
-		/**
-		 * This function tests if current tags' content contains xHTML tags. 
-		 * This function is mostly used for output formatting
-		 */
-		hasTagsInContent: function() {
-			return require('utils').matchesTag(this.getContent());
-		},
-		
-		/**
-		 * Set textual content for tag
-		 * @param {String} str Tag's content
-		 */
-		setContent: function(data) {
-			// XXX do I really should escape pipe here?
-			// I think 'resource' module is a better place
-			if (_.isString(data)) {
-				var utils = require('utils');
-				this._content = utils.replaceUnescapedSymbol(data || '', '|', utils.getCaretPlaceholder());
-			} else if (_.isFunction(data)) {
-				this._content = data;
-			}
-		},
-		
-		/**
-		 * Returns tag's textual content
-		 * @return {String}
-		 */
-		getContent: function() {
-			return _.isFunction(this._content) 
-				? this._content(this) 
-				: this._content || '';
-		},
-		
-		/**
-		 * Set content that should be pasted to the output
-		 * @param {String} val
-		 */
-		setPasteContent: function(val) {
-			this._paste_content = require('utils').escapeText(val);
-		},
-		
-		/**
-		 * Get content that should be pasted to the output
-		 * @return {String}
-		 */
-		getPasteContent: function() {
-			return this._paste_content;
-		},
-		
-		/**
-		 * Search for deepest and latest child of current element
-		 * @return {ParsedElement} Returns null if there's no children
-		 */
-		findDeepestChild: function() {
-			if (!this.children || !this.children.length)
-				return null;
-				
-			var deepestChild = this;
-			while (deepestChild.children.length) {
-				deepestChild = _.last(deepestChild.children);
-			}
-			
-			return deepestChild;
-		}
-	};
-	
-	var elems = require('elements');
-	elems.add('parsedElement', function(node, syntax, resource, options) {
-		var res = require('resources');
-		
-		if (_.isString(resource)) {
-			resource = elems.create('element', resource);
-		}
-		
-		if (!resource && node.name) {
-			resource = res.getAbbreviation(syntax, node.name);
-		}
-		
-		if (resource && elems.is(resource, 'reference')) {
-			resource = res.getAbbreviation(syntax, resource.data);
-		}
-		
-		var elem = new ParsedElement(node, syntax, resource, options);
-		// add default attributes
-		if (elem._abbr)
-			elem.copyAttributes(elem._abbr);
-		
-		elem.copyAttributes(node);
-		
-		return elem;
-	});
-	
-	elems.add('parsedSnippet', function(node, syntax, resource, options) {
-		if (_.isString(resource))
-			resource = elems.create('snippet', resource);
-		
-		var elem = new ParsedElement(node, syntax, resource, options);
-		var utils = require('utils');
-		var res = require('resources');
-		
-		var data = resource ? resource.data : res.getSnippet(syntax, elem.name);
-		// XXX do I really should escape pipe here?
-		// I think 'resource' module is a better place
-		elem.value = utils.replaceUnescapedSymbol(data, '|', utils.getCaretPlaceholder());
-		
-		// override some attributes
-		elem.addAttribute('id', utils.getCaretPlaceholder());
-		elem.addAttribute('class', utils.getCaretPlaceholder());
-		elem.copyAttributes(node);
-		
-		return elem;
-	});
-});/**
- * <code>ZenNode</code> — an element in final transformation process which will 
- * be used to generate output
- * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- * @param {Function} require
- * @param {Underscore} _
- */
-zen_coding.exec(function(require, _) {
-	/**
-	 * Test if text contains output placeholder $#
-	 * @param {String} text
-	 * @return {Boolean}
-	 */
-	function hasOutputPlaceholder(text) {
-		for (var i = 0, il = text.length; i < il; i++) {
-			var ch = text.charAt(i);
-			if (ch == '\\') { // escaped char
-				i++;
-				continue;
-			} else if (ch == '$' && text.charAt(i + 1) == '#') {
-				return true;
-			}
-		}
-		
-		return false;
-	}
-	
-	/**
-	 * Creates simplified element from parsed tree
-	 * @param {ParsedElement} elem
-	 */
-	function ZenNode(elem, options) {
-		var elems = require('elements');
-		
-		this.nodeType = elems.is(elem, 'parsedSnippet') ? 'snippet' : 'element';
-		this.children = [];
-		this.counter = 1;
-		this.options = _.extend({}, elem.options, options || {});
-		
-		// copy attributes
-		_.each('name,real_name,is_repeating,repeat_by_lines,has_implicit_name'.split(','), function(p) {
-			this[p] = elem[p];
-		}, this);
-		
-		// create deep copy of attribute list so we can change
-		// their values in runtime without affecting other nodes
-		// created from the same element
-		this.attributes = _.map(elem.attributes, function(a) {
-			return _.clone(a);
-		});
-		
-		/** @type {ParsedElement} Source element from which current element was created */
-		this.source = elem;
-		
-		/** @type String Name of current node */
-		this.name = elem.name;
-		
-		// relations
-		/** @type {ZenNode} */
-		this.parent = null;
-		/** @type {ZenNode} */
-		this.nextSibling = null;
-		/** @type {ZenNode} */
-		this.previousSibling = null;
-		
-		// output params
-		this.start = '';
-		this.end = '';
-		this.content = elem.getContent() || '';
-		this.padding = '';
-	}
-	
-	ZenNode.prototype = {
-		/**
-		 * Add child node
-		 * @param {ZenNode} node
-		 */
-		addChild: function(node) {
-			node.parent = this;
-			
-			// check for implicit name
-//			if (node.has_implicit_name && this.source.name && this.isInline()) {
-//				node.name = 'span';
-//			}
-			
-			var lastChild = _.last(this.children);
-			if (lastChild) {
-				node.previousSibling = lastChild;
-				lastChild.nextSibling = node;
-			}
-			
-			this.children.push(node);
-		},
-		
-		/**
-		 * Returns attribute object
-		 * @private
-		 * @param {String} name Attribute name
-		 */
-		_getAttr: function(name) {
-			name = name.toLowerCase();
-			return _.find(this.attributes, function(a) {
-				return a.name.toLowerCase() == name;
-			});
-		},
-		
-		/**
-		 * Get attribute's value.
-		 * @param {String} name
-		 * @return {String} Returns <code>null</code> if attribute wasn't found
-		 */
-		getAttribute: function(name) {
-			var attr = this._getAttr(name);
-			return _.isUndefined(attr) ? null : attr.value;
-		},
-		
-		/**
-		 * Set attribute's value.
-		 * @param {String} name
-		 * @param {String} value
-		 */
-		setAttribute: function(name, value) {
-			var attr = this._getAttr(name);
-			if (attr)
-				attr.value = value;
-		},
-		
-		/**
-		 * Test if current element is unary (no closing tag)
-		 * @return {Boolean}
-		 */
-		isUnary: function() {
-			if (this.nodeType == 'snippet')
-				return false;
-				
-			return (this.source._abbr && this.source._abbr.is_empty) 
-				|| require('tagName').isEmptyElement(this.name);
-		},
-		
-		/**
-		 * Test if current element is inline-level (like &lt;strong&gt;, &lt;img&gt;)
-		 * @return {Boolean}
-		 */
-		isInline: function() {
-			return this.nodeType == 'text' || !this.name
-				|| require('tagName').isInlineLevel(this.name);
-		},
-		
-		/**
-		 * Test if current element is block-level
-		 * @return {Boolean}
-		 */
-		isBlock: function() {
-			return this.nodeType == 'snippet' || !this.isInline();
-		},
-		
-		/**
-		 * This function tests if current elements' content contains xHTML tags. 
-		 * This function is mostly used for output formatting
-		 */
-		hasTagsInContent: function() {
-			return require('utils').matchesTag(this.content);
-		},
-		
-		/**
-		 * Check if element has child elements
-		 * @return {Boolean}
-		 */
-		hasChildren: function() {
-			return !!this.children.length;
-		},
-		
-		/**
-		 * Test if current element contains block-level children
-		 * @return {Boolean}
-		 */
-		hasBlockChildren: function() {
-			return (this.hasTagsInContent() && this.isBlock()) 
-				|| _.any(this.children, function(child) {
-					return child.isBlock();
-				});
-		},
-		
-		/**
-		 * Search for deepest and latest child of current element
-		 * @return {ZenNode} Returns <code>null</code> if there's no children
-		 */
-		findDeepestChild: function() {
-			if (!this.children.length)
-				return null;
-				
-			var deepestChild = this;
-			while (deepestChild.children.length) {
-				deepestChild = _.last(deepestChild.children);
-			}
-			
-			return deepestChild;
-		},
-		
-		/**
-		 * Returns string output for current node
-		 * @return {String}
-		 */
-		toString: function() {
-			var innerContent = _.map(this.children, function(child) {
-				return child.toString();
-			}).join('');
-			
-			return this.start + this.content + innerContent + this.end;
-		},
-		
-		/**
-		 * Test if current element contains output placeholder (aka $#)
-		 * @return {Boolean}
-		 */
-		hasOutputPlaceholder: function() {
-			if (hasOutputPlaceholder(this.content)) {
-				return true;
-			} else {
-				// search inside attributes
-				for (var i = 0, il = this.attributes.length; i < il; i++) {
-					if (hasOutputPlaceholder(this.attributes[i].value))
-						return true;
-				}
-			}
-			
-			return false;
-		},
-		
-		/**
-		 * Recursively search for elements with output placeholders (aka $#)
-		 * inside current element (not included in result)
-		 * @param {Array} receiver
-		 * @return {Array} Array of elements with output placeholders.  
-		 */
-		findElementsWithOutputPlaceholder: function(receiver) {
-			receiver = receiver || [];
-			_.each(this.children, function(child) {
-				if (child.hasOutputPlaceholder()) {
-					receiver.push(child);
-				}
-				child.findElementsWithOutputPlaceholder(receiver);
-			});
-			
-			return receiver;
-		},
-		
-		/**
-		 * Paste content in context of current node. Pasting is a special case
-		 * of recursive adding content in node. 
-		 * This function will try to find $# placeholder inside node's 
-		 * attributes and text content and replace in with <code>text</code>.
-		 * If it doesn't find $# placeholder, it will put <code>text</code>
-		 * value as the deepest child content
-		 * @param {String} text Text to paste
-		 */
-		pasteContent: function(text) {
-			var symbol = '$#';
-			var r = [symbol, text];
-			var replaceFn = function() {return r;};
-			var utils = require('utils');
-			var items = [];
-				
-			if (this.hasOutputPlaceholder())
-				items.push(this);
-				
-			items = items.concat(this.findElementsWithOutputPlaceholder());
-			
-			if (items.length) {
-				_.each(items, function(item){
-					item.content = utils.replaceUnescapedSymbol(item.content, symbol, replaceFn);
-					_.each(item.attributes, function(a) {
-						a.value = utils.replaceUnescapedSymbol(a.value, symbol, replaceFn);
-					});
-				});
-			} else {
-				// no placeholders found, add content to the deepest child
-				var child = this.findDeepestChild() || this;
-				child.content += text;
-			}
-		},
-		
-		/**
-		 * Check if current node name implied name (e.g. name is undefined,
-		 * but it should exist in output)
-		 * @returns {Boolean}
-		 */
-		hasImpliedName: function() {
-			return !this.name && this.has_implicit_name && this.nodeType == 'element';
-		}
-	};
-	
-	require('elements').add('ZenNode', function(elem, options) {
-		return new ZenNode(elem, options);
-	});
-});/**
- * Zen Coding abbreviation parser. This module is designed to be stand-alone
- * (e.g. without any dependencies) so authors can copy this file into their
- * projects
- * @author Sergey Chikuyonok (serge.che@gmail.com)
- * @link http://chikuyonok.ru
- * @memberOf __abbreviationParser
- * @constructor
- */zen_coding.define('abbreviationParser', function(require, _) {
-	var reValidName = /^[\w\d\-_\$\:@!]+\+?$/i;
-	
-	/**
-	 * @type TreeNode
-	 */
-	function TreeNode(parent) {
-		this.abbreviation = '';
-		/** @type {TreeNode} */
-		this.parent = null;
-		this.children = [];
-		this.count = 1;
-		this.name = null;
-		this.text = null;
-		this.attributes = [];
-		this.is_repeating = false;
-		this.has_implict_name = false;
-	}
-	
-	TreeNode.prototype = {
-		/**
-		 * Adds passed or creates new child
-		 * @param {TreeNode} [child]
-		 * @return {TreeNode}
-		 */
-		addChild: function(child) {
-			child = child || new TreeNode;
-			child.parent = this;
-			this.children.push(child);
-			return child;
-		},
-		
-		/**
-		 * Replace current node in parent's child list with another node
-		 * @param {TreeNode} node
-		 */
-		replace: function(node) {
-			if (this.parent) {
-				var children = this.parent.children;
-				for (var i = 0, il = children.length; i < il; i++) {
-					if (children[i] === this) {
-						children[i] = node;
-						this.parent = null;
-						return;
-					}
-				}
-			}
-		},
-		
-		/**
-		 * Sets abbreviation that belongs to current node
-		 * @param {String} abbr
-		 */
-		setAbbreviation: function(abbr) {
-			this.abbreviation = abbr;
-			var m = abbr.match(/\*(\d+)?$/);
-			if (m) {
-				this.count = parseInt(m[1] || 1, 10);
-				this.is_repeating = !m[1];
-				abbr = abbr.substr(0, abbr.length - m[0].length);
-			}
-			
-			if (abbr) {
-				var name_text = splitExpression(abbr);
-				var name = name_text[0];
-				if (name_text.length == 2)
-					this.text = name_text[1];
-					
-				if (name) {
-					var attr_result = parseAttributes(name);
-					this.name = attr_result[0] || '';
-					this.has_implict_name = !attr_result[0];
-					this.attributes = attr_result[1];
-				}
-			}
-			
-			// validate name
-			if (this.name && !reValidName.test(this.name)) {
-				throw new Error('InvalidAbbreviation');
-			}
-		},
-		
-		/**
-		 * @return {String}
-		 */
-		getAbbreviation: function() {
-			return this.expr;
-		},
-		
-		/**
-		 * Dump current tree node into a foramtted string
-		 * @return {String}
-		 */
-		toString: function(level) {
-			level = level || 0;
-			var output = '(empty)';
-			if (this.abbreviation) {
-				output = '';
-				if (this.name)
-					output = this.name;
-					
-				if (this.text !== null)
-					output += (output ? ' ' : '') + '{text: "' + this.text + '"}';
-					
-				if (this.attributes.length) {
-					var attrs = [];
-					for (var i = 0, il = this.attributes.length; i < il; i++) {
-						attrs.push(this.attributes[i].name + '="' + this.attributes[i].value + '"'); 
-					}
-					output += ' [' + attrs.join(', ') + ']';
-				}
-			}
-			var result = require('utils').repeatString('-', level)
-				+ output 
-				+ '\n';
-			for (var i = 0, il = this.children.length; i < il; i++) {
-				result += this.children[i].toString(level + 1);
-			}
-			
-			return result;
-		},
-		
-		/**
-		 * Check if current node contains children with empty <code>expr</code>
-		 * property
-		 * @return {Boolean}
-		 */
-		hasEmptyChildren: function() {
-			for (var i = 0, il = this.children.length; i < il; i++) {
-				if (this.children[i].isEmpty())
-					return true;
-			}
-			
-			return false;
-		},
-		
-		/**
-		 * Indicates empty node (i.e. without abbreviation). It may be a 
-		 * grouping node and should not be outputted
-		 * @return {Boolean}
-		 */
-		isEmpty: function() {
-			return !this.abbreviation;
-		},
-		
-		/**
-		 * Check if current node is a text-only node
-		 * @return {Boolean}
-		 */
-		isTextNode: function() {
-			return !this.name && this.text;
-		},
-		
-		/**
-		 * Indicates whether this node may be used to build elements or snippets
-		 * @returns {Boolean}
-		 */
-		isElement: function() {
-			return !this.isEmpty() && !this.isTextNode();
-		},
-		
-		/**
-		 * Returns attribute value (might be empty string) or <code>null</code> 
-		 * if attribute wasn't found 
-		 * @param {String} name
-		 * @returns {String}
-		 */
-		getAttribute: function(name) {
-			for (var i = 0, il = this.attributes.length; i < il; i++) {
-				if (this.attributes[i].name == name)
-					return this.attributes[i].value;
-			}
-			
-			return null;
-		}
-	};
-	
-	/**
-	 * Check if character is numeric
-	 * @requires {Stirng} ch
-	 * @return {Boolean}
-	 */
-	function isNumeric(ch) {
-		if (typeof(ch) == 'string')
-			ch = ch.charCodeAt(0);
-			
-		return (ch && ch > 47 && ch < 58);
-	}
-	
-	/**
-	 * Optimizes tree node: replaces empty nodes with their children
-	 * @param {TreeNode} node
-	 * @return {TreeNode}
-	 */
-	function squash(node) {
-		for (var i = node.children.length - 1; i >=0; i--) {
-			/** @type {TreeNode} */
-			var n = node.children[i];
-			if (n.isEmpty()) {
-				var args = [i, 1];
-				for (var j = 0, jl = n.children.length; j < jl; j++) {
-					args.push(n.children[j]);
-				}
-				
-				Array.prototype.splice.apply(node.children, args);
-			}
-		}
-		
-		return node;
-	}
-	
-	/**
-	 * Trim whitespace from string
-	 * @param {String} text
-	 * @return {String}
-	 */
-	function trim(text) {
-		return (text || "").replace( /^\s+|\s+$/g, "" );
-	}
-	
-	/**
-	 * Get word, starting at <code>ix</code> character of <code>str</code>
-	 */
-	function getWord(ix, str) {
-		var m = str.substring(ix).match(/^[\w\-:\$]+/);
-		return m ? m[0] : '';
-	}
-	
-	/**
-	 * Extract attributes and their values from attribute set 
-	 * @param {String} attrSet
-	 */
-	function extractAttributes(attrSet) {
-		attrSet = trim(attrSet);
-		var loopCount = 1000; // endless loop protection
-		var reString = /^(["'])((?:(?!\1)[^\\]|\\.)*)\1/;
-		var result = [];
-		var attr;
-			
-		while (attrSet && loopCount--) {
-			var attrName = getWord(0, attrSet);
-			attr = null;
-			if (attrName) {
-				attr = {name: attrName, value: ''};
-				// let's see if attribute has value
-				var ch = attrSet.charAt(attrName.length);
-				switch (ch) {
-					case '=':
-						var ch2 = attrSet.charAt(attrName.length + 1);
-						if (ch2 == '"' || ch2 == "'") {
-							// we have a quoted string
-							var m = attrSet.substring(attrName.length + 1).match(reString);
-							if (m) {
-								attr.value = m[2];
-								attrSet = trim(attrSet.substring(attrName.length + m[0].length + 1));
-							} else {
-								// something wrong, break loop
-								attrSet = '';
-							}
-						} else {
-							// unquoted string
-							var m = attrSet.substring(attrName.length + 1).match(/(.+?)(\s|$)/);
-							if (m) {
-								attr.value = m[1];
-								attrSet = trim(attrSet.substring(attrName.length + m[1].length + 1));
-							} else {
-								// something wrong, break loop
-								attrSet = '';
-							}
-						}
-						break;
-					default:
-						attrSet = trim(attrSet.substring(attrName.length));
-						break;
-				}
-			} else {
-				// something wrong, can't extract attribute name
-				break;
-			}
-			
-			if (attr) result.push(attr);
-		}
-		return result;
-	}
-	
-	/**
-	 * Parses tag attributes extracted from abbreviation
-	 * @param {String} str
-	 */
-	function parseAttributes(str) {
-		/*
-		 * Example of incoming data:
-		 * #header
-		 * .some.data
-		 * .some.data#header
-		 * [attr]
-		 * #item[attr=Hello other="World"].class
-		 */
-		var result = [];
-		var name = '';
-		var collectName = true;
-		var className = null;
-		var charMap = {'#': 'id', '.': 'class'};
-		
-		// walk char-by-char
-		var i = 0;
-		var il = str.length;
-		var val;
-			
-		while (i < il) {
-			var ch = str.charAt(i);
-			switch (ch) {
-				case '#': // id
-					val = getWord(i, str.substring(1));
-					result.push({name: charMap[ch], value: val});
-					i += val.length + 1;
-					collectName = false;
-					break;
-				case '.': // class
-					val = getWord(i, str.substring(1));
-					if (!className) {
-						// remember object pointer for value modification
-						className = {name: charMap[ch], value: ''};
-						result.push(className);
-					}
-					
-					className.value += (className.value ? ' ' : '') + val;
-					i += val.length + 1;
-					collectName = false;
-					break;
-				case '[': //begin attribute set
-					// search for end of set
-					var endIx = str.indexOf(']', i);
-					if (endIx == -1) {
-						// invalid attribute set, stop searching
-						i = str.length;
-					} else {
-						var attrs = extractAttributes(str.substring(i + 1, endIx));
-						for (var j = 0, jl = attrs.length; j < jl; j++) {
-							result.push(attrs[j]);
-						}
-						i = endIx;
-					}
-					collectName = false;
-					break;
-				default:
-					if (collectName)
-						name += ch;
-					i++;
-			}
-		}
-		
-		return [name, result];
-	}
-	
-	/**
-	 * @param {TreeNode} node
-	 * @return {TreeNode}
-	 */
-	function optimizeTree(node) {
-		while (node.hasEmptyChildren())
-			squash(node);
-			
-		for (var i = 0, il = node.children.length; i < il; i++) {
-			optimizeTree(node.children[i]);
-		}
-		
-		return node;
-	}
-	
-	/**
-	 * Split expression by node name and its content, if exists. E.g. if we pass
-	 * <code>a{Text}</code> expression, it will be splitted into <code>a</code>
-	 * and <code>Text</code>
-	 * @param {String} expr
-	 * @return {Array} Result with one or two elements (if expression contains
-	 * text node)
-	 */
-	function splitExpression(expr) {
-		// fast test on text node
-		if (expr.indexOf('{') == -1)
-			return [expr];
-			
-		var attrLvl = 0;
-		var textLvl = 0;
-		var braceStack = [];
-		var i = 0;
-		var il = expr.length;
-		var ch;
-			
-		while (i < il) {
-			ch = expr.charAt(i);
-			switch (ch) {
-				case '[':
-					if (!textLvl)
-						attrLvl++;
-					break;
-				case ']':
-					if (!textLvl)
-						attrLvl--;
-					break;
-				case '{':
-					if (!attrLvl) {
-						textLvl++;
-						braceStack.push(i);
-					}
-					break;
-				case '}':
-					if (!attrLvl) {
-						textLvl--;
-						var brace_start = braceStack.pop();
-						if (textLvl === 0) {
-							// found braces bounds
-							return [
-								expr.substring(0, brace_start),
-								expr.substring(brace_start + 1, i)
-							];
-						}
-					}
-					break;
-			}
-			i++;
-		}
-		
-		// if we are here, then no valid text node found
-		return [expr];
-	}
-	
-	
-	return {
-		/**
-		 * Parses abbreviation into tree with respect of groups, 
-		 * text nodes and attributes. Each node of the tree is a single 
-		 * abbreviation. Tree represents actual structure of the outputted 
-		 * result
-		 * @memberOf abbreviationParser
-		 * @param {String} abbr Abbreviation to parse
-		 * @return {TreeNode}
-		 */
-		parse: function(abbr) {
-			var root = new TreeNode;
-			var context = root.addChild();
-			var i = 0;
-			var il = abbr.length;
-			var textLvl = 0;
-			var attrLvl = 0;
-			var groupStack = [root];
-			var ch, prevCh, token = '';
-				
-			groupStack.last = function() {
-				return this[this.length - 1];
-			};
-			
-			var dumpToken = function() {
-				if (token)
-					context.setAbbreviation(token);
-				token = '';
-			};
-				
-			while (i < il) {
-				ch = abbr.charAt(i);
-				prevCh = i ? abbr.charAt(i - 1) : '';
-				switch (ch) {
-					case '{':
-						if (!attrLvl)
-							textLvl++;
-						token += ch;
-						break;
-					case '}':
-						if (!attrLvl)
-							textLvl--;
-						token += ch;
-						break;
-					case '[':
-						if (!textLvl)
-							attrLvl++;
-						token += ch;
-						break;
-					case ']':
-						if (!textLvl)
-							attrLvl--;
-						token += ch;
-						break;
-					case '(':
-						if (!textLvl && !attrLvl) {
-							// beginning of the new group
-							dumpToken();
-							
-							if (prevCh != '+' && prevCh != '>') {
-								// previous char is not an operator, assume it's
-								// a sibling
-								context = context.parent.addChild();
-							}
-							
-							groupStack.push(context);
-							context = context.addChild();
-						} else {
-							token += ch;
-						}
-						break;
-					case ')':
-						if (!textLvl && !attrLvl) {
-							// end of the group, pop stack
-							dumpToken();
-							context = groupStack.pop();
-							
-							if (i < il - 1 && abbr.charAt(i + 1) == '*') {
-								// group multiplication
-								var group_mul = '', n_ch;
-								for (var j = i + 2; j < il; j++) {
-									n_ch = abbr.charAt(j);
-									if (isNumeric(n_ch))
-										group_mul += n_ch;
-									else 
-										break;
-								}
-								
-								i += group_mul.length + 1;
-								group_mul = parseInt(group_mul || 1, 10);
-								while (1 < group_mul--)
-									context.parent.addChild(context);
-//									last_parent.addChild(cur_item);
-							}
-							
-						} else {
-							token += ch;
-						}
-						break;
-					case '+': // sibling operator
-						if (!textLvl && !attrLvl && i != il - 1 /* expando? */) {
-							dumpToken();
-							context = context.parent.addChild();
-						} else {
-							token += ch;
-						}
-						break;
-					case '>': // child operator
-						if (!textLvl && !attrLvl) {
-							dumpToken();
-							context = context.addChild();
-						} else {
-							token += ch;
-						}
-						break;
-					default:
-						token += ch;
-				}
-				
-				i++;
-			}
-			// put the final token
-			dumpToken();
-			
-			return optimizeTree(root);
-		},
-		
-		/**
-		 * Check if passed symbol is valid symbol for abbreviation expression
-		 * @param {String} ch
-		 * @return {Boolean}
-		 */
-		isAllowedChar: function(ch) {
-			ch = String(ch); // convert Java object to JS
-			var charCode = ch.charCodeAt(0);
-			var specialChars = '#.>+*:$-_!@[]()|';
-			
-			return (charCode > 64 && charCode < 91)       // uppercase letter
-					|| (charCode > 96 && charCode < 123)  // lowercase letter
-					|| isNumeric(ch)                 // number
-					|| specialChars.indexOf(ch) != -1;    // special character
-		},
-		
-		TreeNode: TreeNode,
-		optimizeTree: optimizeTree
-	};
-});/**
- * @author Stoyan Stefanov
- * @link https://github.com/stoyan/etc/tree/master/cssex
- */
-
-zen_coding.define('cssParser', function(require, _) {
-var walker, tokens = [], isOp, isNameChar, isDigit;
-    
-    // walks around the source
-    walker = {
-        lines: null,
-        total_lines: 0,
-        linenum: -1,
-        line: '',
-        ch: '',
-        chnum: -1,
-        init: function (source) {
-            var me = walker;
-        
-            // source, yumm
-            me.lines = source
-                .replace(/\r\n/g, '\n')
-                .replace(/\r/g, '\n')
-                .split('\n');
-            me.total_lines = me.lines.length;
-        
-            // reset
-            me.chnum = -1;
-            me.linenum = -1;
-            me.ch = '';
-            me.line = '';
-        
-            // advance
-            me.nextLine();
-            me.nextChar();
-        },
-        nextLine: function () {
-            var me = this;
-            me.linenum += 1;
-            if (me.total_lines <= me.linenum) {
-                me.line = false;
-            } else {
-                me.line = me.lines[me.linenum];
-            }
-            if (me.chnum !== -1) {
-                me.chnum = 0;
-            }
-            return me.line;
-        }, 
-        nextChar: function () {
-            var me = this;
-            me.chnum += 1;
-            while (me.line.charAt(me.chnum) === '') {
-                if (this.nextLine() === false) {
-                    me.ch = false;
-                    return false; // end of source
-                }
-                me.chnum = -1;
-                me.ch = '\n';
-                return '\n';
-            }
-            me.ch = me.line.charAt(me.chnum);
-            return me.ch;
-        },
-        peek: function() {
-            return this.line.charAt(this.chnum + 1);
-        }
-    };
-
-    // utility helpers
-    isNameChar = function (c) {
-        return (c === '_' || c === '-' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
-    };
-
-    isDigit = function (ch) {
-        return (ch !== false && ch >= '0' && ch <= '9');
-    };  
-
-    isOp = (function () {
-        var opsa = "{}[]()+*=.,;:>~|\\%$#@^!".split(''),
-            opsmatcha = "*^|$~".split(''),
-            ops = {},
-            opsmatch = {},
-            i = 0;
-        for (; i < opsa.length; i += 1) {
-            ops[opsa[i]] = true;
-        }
-        for (i = 0; i < opsmatcha.length; i += 1) {
-            opsmatch[opsmatcha[i]] = true;
-        }
-        return function (ch, matchattr) {
-            if (matchattr) {
-                return !!opsmatch[ch];
-            }
-            return !!ops[ch];
-        };
-    }());
-    
-    // shorthands
-    function isset(v) {
-        return typeof v !== 'undefined';
-    }
-    function getConf() {
-        return {
-            'char': walker.chnum,
-            line: walker.linenum
-        };
-    }
-
-
-    // creates token objects and pushes them to a list
-    function tokener(value, type, conf) {
-        var w = walker, c = conf || {};
-        tokens.push({
-            charstart: isset(c['char']) ? c['char'] : w.chnum,
-            charend:   isset(c.charend) ? c.charend : w.chnum,
-            linestart: isset(c.line)    ? c.line    : w.linenum,
-            lineend:   isset(c.lineend) ? c.lineend : w.linenum,
-            value:     value,
-            type:      type || value
-        });
-    }
-    
-    // oops
-    function error(m, config) { 
-        var w = walker,
-            conf = config || {},
-            c = isset(conf['char']) ? conf['char'] : w.chnum,
-            l = isset(conf.line) ? conf.line : w.linenum;
-        return {
-            name: "ParseError",
-            message: m + " at line " + (l + 1) + ' char ' + (c + 1),
-            walker: w,
-            tokens: tokens
-        };
-    }
-
-
-    // token handlers follow for:
-    // white space, comment, string, identifier, number, operator
-    function white() {
-    
-        var c = walker.ch,
-            token = '',
-            conf = getConf();
-    
-        while (c === " " || c === "\t") {
-            token += c;
-            c = walker.nextChar();
-        }
-    
-        tokener(token, 'white', conf);
-    
-    }
-
-    function comment() {
-    
-        var w = walker,
-            c = w.ch,
-            token = c,
-            cnext,
-            conf = getConf();    
-     
-        cnext = w.nextChar();
-        
-        if (cnext !== '*') {
-            // oops, not a comment, just a /
-            conf.charend = conf['char'];
-            conf.lineend = conf.line;
-            return tokener(token, token, conf);
-        }
-    
-        while (!(c === "*" && cnext === "/")) {
-            token += cnext;
-            c = cnext;
-            cnext = w.nextChar();        
-        }
-        token += cnext;
-        w.nextChar();
-        tokener(token, 'comment', conf);
-    }
-
-    function str() {
-        var w = walker,
-            c = w.ch,
-            q = c,
-            token = c,
-            cnext,
-            conf = getConf();
-    
-        c = w.nextChar();
-    
-        while (c !== q) {
-            
-            if (c === '\n') {
-                cnext = w.nextChar();
-                if (cnext === "\\") {
-                    token += c + cnext;
-                } else {
-                    // end of line with no \ escape = bad
-                    throw error("Unterminated string", conf);
-                }
-            } else {
-                if (c === "\\") {
-                    token += c + w.nextChar();
-                } else {
-                    token += c;
-                }
-            }
-        
-            c = w.nextChar();
-        
-        }
-        token += c;
-        w.nextChar();
-        tokener(token, 'string', conf);
-    }
-    
-    function brace() {
-        var w = walker,
-            c = w.ch,
-            depth = 0,
-            token = c,
-            conf = getConf();
-    
-        c = w.nextChar();
-    
-        while (c !== ')' && !depth) {
-        	if (c === '(') {
-        		depth++;
-        	} else if (c === ')') {
-        		depth--;
-        	} else if (c === false) {
-        		throw error("Unterminated brace", conf);
-        	}
-        	
-        	token += c;
-            c = w.nextChar();
-        }
-        
-        token += c;
-        w.nextChar();
-        tokener(token, 'brace', conf);
-    }
-
-    function identifier(pre) {
-        var w = walker,
-            c = w.ch,
-            conf = getConf(),
-            token = (pre) ? pre + c : c;
-            
-        c = w.nextChar();
-    
-        if (pre) { // adjust token position
-        	conf['char'] -= pre.length;
-        }
-        
-        while (isNameChar(c) || isDigit(c)) {
-            token += c;
-            c = w.nextChar();
-        }
-    
-        tokener(token, 'identifier', conf);    
-    }
-
-    function num() {
-        var w = walker,
-            c = w.ch,
-            conf = getConf(),
-            token = c,
-            point = token === '.',
-            nondigit;
-        
-        c = w.nextChar();
-        nondigit = !isDigit(c);
-    
-        // .2px or .classname?
-        if (point && nondigit) {
-            // meh, NaN, could be a class name, so it's an operator for now
-            conf.charend = conf['char'];
-            conf.lineend = conf.line;
-            return tokener(token, '.', conf);    
-        }
-        
-        // -2px or -moz-something
-        if (token === '-' && nondigit) {
-            return identifier('-');
-        }
-    
-        while (c !== false && (isDigit(c) || (!point && c === '.'))) { // not end of source && digit or first instance of .
-            if (c === '.') {
-                point = true;
-            }
-            token += c;
-            c = w.nextChar();
-        }
-
-        tokener(token, 'number', conf);    
-    
-    }
-
-    function op() {
-        var w = walker,
-            c = w.ch,
-            conf = getConf(),
-            token = c,
-            next = w.nextChar();
-            
-        if (next === "=" && isOp(token, true)) {
-            token += next;
-            tokener(token, 'match', conf);
-            w.nextChar();
-            return;
-        } 
-        
-        conf.charend = conf['char'] + 1;
-        conf.lineend = conf.line;    
-        tokener(token, token, conf);
-    }
-
-
-    // call the appropriate handler based on the first character in a token suspect
-    function tokenize() {
-
-        var ch = walker.ch;
-    
-        if (ch === " " || ch === "\t") {
-            return white();
-        }
-
-        if (ch === '/') {
-            return comment();
-        } 
-
-        if (ch === '"' || ch === "'") {
-            return str();
-        }
-        
-        if (ch === '(') {
-            return brace();
-        }
-    
-        if (ch === '-' || ch === '.' || isDigit(ch)) { // tricky - char: minus (-1px) or dash (-moz-stuff)
-            return num();
-        }
-    
-        if (isNameChar(ch)) {
-            return identifier();
-        }
-
-        if (isOp(ch)) {
-            return op();
-        }
-        
-        if (ch === "\n") {
-            tokener("line");
-            walker.nextChar();
-            return;
-        }
-        
-        throw error("Unrecognized character");
-    }
-    
-    /**
-	 * Returns newline character at specified position in content
-	 * @param {String} content
-	 * @param {Number} pos
-	 * @return {String}
-	 */
-	function getNewline(content, pos) {
-		return content.charAt(pos) == '\r' && content.charAt(pos + 1) == '\n' 
-			? '\r\n' 
-			: content.charAt(pos);
-	}
-
-    return {
-    	/**
-    	 * @param source
-    	 * @returns
-    	 * @memberOf zen_coding.cssParser
-    	 */
-        lex: function (source) {
-            walker.init(source);
-            tokens = [];
-            while (walker.ch !== false) {
-                tokenize();            
-            }
-            return tokens;
-        },
-        
-        /**
-         * Tokenizes CSS source
-         * @param {String} source
-         * @returns {Array}
-         */
-        parse: function(source) {
-        	// transform tokens
-	 		var pos = 0;
-	 		return _.map(this.lex(source), function(token) {
-	 			if (token.type == 'line') {
-	 				token.value = getNewline(source, pos);
-	 			}
-	 			
-	 			return {
-	 				type: token.type,
-	 				start: pos,
-	 				end: (pos += token.value.length)
-	 			};
-			});
-		},
-        
-        toSource: function (toks) {
-            var i = 0, max = toks.length, t, src = '';
-            for (; i < max; i += 1) {
-                t = toks[i];
-                if (t.type === 'line') {
-                    src += '\n';
-                } else {
-                    src += t.value;
-                }
-            }
-            return src;
-        }
-    };
-});/**
- * HTML tokenizer by Marijn Haverbeke
- * http://codemirror.net/
- * @constructor
- * @memberOf __xmlParseDefine
- * @param {Function} require
- * @param {Underscore} _
- */
-zen_coding.define('xmlParser', function(require, _) {
-	var Kludges = {
-		autoSelfClosers : {},
-		implicitlyClosed : {},
-		contextGrabbers : {},
-		doNotIndent : {},
-		allowUnquoted : true,
-		allowMissing : true
-	};
-
-	// Return variables for tokenizers
-	var tagName = null, type = null;
-
-	function inText(stream, state) {
-		function chain(parser) {
-			state.tokenize = parser;
-			return parser(stream, state);
-		}
-
-		var ch = stream.next();
-		if (ch == "<") {
-			if (stream.eat("!")) {
-				if (stream.eat("[")) {
-					if (stream.match("CDATA["))
-						return chain(inBlock("atom", "]]>"));
-					else
-						return null;
-				} else if (stream.match("--"))
-					return chain(inBlock("comment", "-->"));
-				else if (stream.match("DOCTYPE", true, true)) {
-					stream.eatWhile(/[\w\._\-]/);
-					return chain(doctype(1));
-				} else
-					return null;
-			} else if (stream.eat("?")) {
-				stream.eatWhile(/[\w\._\-]/);
-				state.tokenize = inBlock("meta", "?>");
-				return "meta";
-			} else {
-				type = stream.eat("/") ? "closeTag" : "openTag";
-				stream.eatSpace();
-				tagName = "";
-				var c;
-				while ((c = stream.eat(/[^\s\u00a0=<>\"\'\/?]/)))
-					tagName += c;
-				state.tokenize = inTag;
-				return "tag";
-			}
-		} else if (ch == "&") {
-			var ok;
-			if (stream.eat("#")) {
-				if (stream.eat("x")) {
-					ok = stream.eatWhile(/[a-fA-F\d]/) && stream.eat(";");
-				} else {
-					ok = stream.eatWhile(/[\d]/) && stream.eat(";");
-				}
-			} else {
-				ok = stream.eatWhile(/[\w\.\-:]/) && stream.eat(";");
-			}
-			return ok ? "atom" : "error";
-		} else {
-			stream.eatWhile(/[^&<]/);
-			return "text";
-		}
-	}
-
-	function inTag(stream, state) {
-		var ch = stream.next();
-		if (ch == ">" || (ch == "/" && stream.eat(">"))) {
-			state.tokenize = inText;
-			type = ch == ">" ? "endTag" : "selfcloseTag";
-			return "tag";
-		} else if (ch == "=") {
-			type = "equals";
-			return null;
-		} else if (/[\'\"]/.test(ch)) {
-			state.tokenize = inAttribute(ch);
-			return state.tokenize(stream, state);
-		} else {
-			stream.eatWhile(/[^\s\u00a0=<>\"\'\/?]/);
-			return "word";
-		}
-	}
-
-	function inAttribute(quote) {
-		return function(stream, state) {
-			while (!stream.eol()) {
-				if (stream.next() == quote) {
-					state.tokenize = inTag;
-					break;
-				}
-			}
-			return "string";
-		};
-	}
-
-	function inBlock(style, terminator) {
-		return function(stream, state) {
-			while (!stream.eol()) {
-				if (stream.match(terminator)) {
-					state.tokenize = inText;
-					break;
-				}
-				stream.next();
-			}
-			return style;
-		};
-	}
-	
-	function doctype(depth) {
-		return function(stream, state) {
-			var ch;
-			while ((ch = stream.next()) != null) {
-				if (ch == "<") {
-					state.tokenize = doctype(depth + 1);
-					return state.tokenize(stream, state);
-				} else if (ch == ">") {
-					if (depth == 1) {
-						state.tokenize = inText;
-						break;
-					} else {
-						state.tokenize = doctype(depth - 1);
-						return state.tokenize(stream, state);
-					}
-				}
-			}
-			return "meta";
-		};
-	}
-
-	var curState = null, setStyle;
-	function pass() {
-		for (var i = arguments.length - 1; i >= 0; i--)
-			curState.cc.push(arguments[i]);
-	}
-	
-	function cont() {
-		pass.apply(null, arguments);
-		return true;
-	}
-
-	function pushContext(tagName, startOfLine) {
-		var noIndent = Kludges.doNotIndent.hasOwnProperty(tagName) 
-			|| (curState.context && curState.context.noIndent);
-		curState.context = {
-			prev : curState.context,
-			tagName : tagName,
-			indent : curState.indented,
-			startOfLine : startOfLine,
-			noIndent : noIndent
-		};
-	}
-	
-	function popContext() {
-		if (curState.context)
-			curState.context = curState.context.prev;
-	}
-
-	function element(type) {
-		if (type == "openTag") {
-			curState.tagName = tagName;
-			return cont(attributes, endtag(curState.startOfLine));
-		} else if (type == "closeTag") {
-			var err = false;
-			if (curState.context) {
-				if (curState.context.tagName != tagName) {
-					if (Kludges.implicitlyClosed.hasOwnProperty(curState.context.tagName.toLowerCase())) {
-						popContext();
-					}
-					err = !curState.context || curState.context.tagName != tagName;
-				}
-			} else {
-				err = true;
-			}
-			
-			if (err)
-				setStyle = "error";
-			return cont(endclosetag(err));
-		}
-		return cont();
-	}
-	
-	function endtag(startOfLine) {
-		return function(type) {
-			if (type == "selfcloseTag"
-					|| (type == "endTag" && Kludges.autoSelfClosers
-							.hasOwnProperty(curState.tagName
-									.toLowerCase()))) {
-				maybePopContext(curState.tagName.toLowerCase());
-				return cont();
-			}
-			if (type == "endTag") {
-				maybePopContext(curState.tagName.toLowerCase());
-				pushContext(curState.tagName, startOfLine);
-				return cont();
-			}
-			return cont();
-		};
-	}
-	
-	function endclosetag(err) {
-		return function(type) {
-			if (err)
-				setStyle = "error";
-			if (type == "endTag") {
-				popContext();
-				return cont();
-			}
-			setStyle = "error";
-			return cont(arguments.callee);
-		};
-	}
-	
-	function maybePopContext(nextTagName) {
-		var parentTagName;
-		while (true) {
-			if (!curState.context) {
-				return;
-			}
-			parentTagName = curState.context.tagName.toLowerCase();
-			if (!Kludges.contextGrabbers.hasOwnProperty(parentTagName)
-					|| !Kludges.contextGrabbers[parentTagName].hasOwnProperty(nextTagName)) {
-				return;
-			}
-			popContext();
-		}
-	}
-
-	function attributes(type) {
-		if (type == "word") {
-			setStyle = "attribute";
-			return cont(attribute, attributes);
-		}
-		if (type == "endTag" || type == "selfcloseTag")
-			return pass();
-		setStyle = "error";
-		return cont(attributes);
-	}
-	
-	function attribute(type) {
-		if (type == "equals")
-			return cont(attvalue, attributes);
-		if (!Kludges.allowMissing)
-			setStyle = "error";
-		return (type == "endTag" || type == "selfcloseTag") ? pass()
-				: cont();
-	}
-	
-	function attvalue(type) {
-		if (type == "string")
-			return cont(attvaluemaybe);
-		if (type == "word" && Kludges.allowUnquoted) {
-			setStyle = "string";
-			return cont();
-		}
-		setStyle = "error";
-		return (type == "endTag" || type == "selfCloseTag") ? pass()
-				: cont();
-	}
-	
-	function attvaluemaybe(type) {
-		if (type == "string")
-			return cont(attvaluemaybe);
-		else
-			return pass();
-	}
-	
-	function startState() {
-		return {
-			tokenize : inText,
-			cc : [],
-			indented : 0,
-			startOfLine : true,
-			tagName : null,
-			context : null
-		};
-	}
-	
-	function token(stream, state) {
-		if (stream.sol()) {
-			state.startOfLine = true;
-			state.indented = 0;
-		}
-		
-		if (stream.eatSpace())
-			return null;
-
-		setStyle = type = tagName = null;
-		var style = state.tokenize(stream, state);
-		state.type = type;
-		if ((style || type) && style != "comment") {
-			curState = state;
-			while (true) {
-				var comb = state.cc.pop() || element;
-				if (comb(type || style))
-					break;
-			}
-		}
-		state.startOfLine = false;
-		return setStyle || style;
-	}
-
-	return {
-		/**
-		 * @memberOf zen_coding.xmlParser
-		 * @returns
-		 */
-		parse: function(data, offset) {
-			offset = offset || 0;
-			var state = startState();
-			var stream = require('stringStream').create(data);
-			var tokens = [];
-			while (!stream.eol()) {
-				tokens.push({
-					type: token(stream, state),
-					start: stream.start + offset,
-					end: stream.pos + offset
-				});
-				stream.start = stream.pos;
-			}
-			
-			return tokens;
-		}		
-	};
-});
-/**
  * Abstract implementation of edit tree interface.
  * Edit tree is a named container of editable “name-value” child elements, 
  * parsed from <code>source</code>. This container provides convenient methods
@@ -7033,9 +7160,22 @@ zen_coding.define('cssEditTree', function(require, _) {
 		_saveStyle: function() {
 			var start = this._positions.contentStart;
 			var source = this.source;
+			var utils = require('utils');
 			
 			_.each(this.list(), /** @param {CSSEditProperty} p */ function(p) {
 				p.styleBefore = source.substring(start, p.namePosition());
+				// a small hack here:
+				// Sometimes users add empty lines before properties to logically
+				// separate groups of properties. In this case, a blind copy of
+				// characters between rules may lead to undesired behavior,
+				// especially when current rule is duplicated or used as a donor
+				// to create new rule.
+				// To solve this issue, we‘ll take only last newline indentation
+				var lines = utils.splitByLines(p.styleBefore);
+				if (lines.length > 1) {
+					p.styleBefore = '\n' + _.last(lines);
+				}
+				
 				p.styleSeparator = source.substring(p.nameRange().end, p.valuePosition());
 				
 				// graceful and naive comments removal 
@@ -7585,10 +7725,10 @@ zen_coding.define('expandAbbreviation', function(require, _) {
 	handlers.add(function(editor, syntax, profile) {
 		var info = require('editorUtils').outputInfo(editor, syntax, profile);
 		var caretPos = editor.getSelectionRange().end;
-		var abbr;
 		var content = '';
+		var abbr = findAbbreviation(editor);
 			
-		if ( (abbr = findAbbreviation(editor)) ) {
+		if (abbr) {
 			content = zen_coding.expandAbbreviation(abbr, info.syntax, info.profile, 
 					require('actionUtils').captureContext(editor));
 			if (content) {
@@ -7696,30 +7836,21 @@ zen_coding.define('wrapWithAbbreviation', function(require, _) {
 			var filters = require('filters');
 			/** @type zen_coding.utils */
 			var utils = require('utils');
-			/** @type zen_coding.transform */
-			var transform = require('transform');
-			
-			var pasted = false;
 			
 			syntax = syntax || zen_coding.defaultSyntax();
 			profile = profile || zen_coding.defaultProfile();
 			
+			require('tabStops').resetTabstopIndex();
+			
 			var data = filters.extractFromAbbreviation(abbr);
-			var parsedTree = transform.createParsedTree(data[0], syntax);
+			var parsedTree = require('abbreviationParser').parse(data[0], {
+				syntax: syntax,
+				pastedContent: text
+			});
 			if (parsedTree) {
-				if (parsedTree.multiply_elem) {
-					// we have a repeating element, put content in
-					parsedTree.multiply_elem.setPasteContent(text);
-					parsedTree.multiply_elem.repeat_by_lines = pasted = true;
-				}
-				
-				var outputTree = transform.rolloutTree(parsedTree);
-				if (!pasted) 
-					outputTree.pasteContent(text);
-				
 				var filtersList = filters.composeList(syntax, profile, data[1]);
-				filters.apply(outputTree, filtersList, profile);
-				return utils.replaceVariables(outputTree.toString());
+				filters.apply(parsedTree, filtersList, profile);
+				return utils.replaceVariables(parsedTree.toString());
 			}
 			
 			return null;
@@ -7773,7 +7904,7 @@ zen_coding.exec(function(require, _) {
 			/** @type CSSRule */
 			var rule = require('cssEditTree').parseFromPosition(info.content, editor.getCaretPos());
 			if (rule) {
-				var property = rule.itemFromPosition(editor.getCaretPos(), true);
+				var property = cssItemFromPosition(rule, editor.getCaretPos());
 				range = property 
 					? property.range(true) 
 					: require('range').create(rule.nameRange(true).start, rule.source);
@@ -7787,6 +7918,29 @@ zen_coding.exec(function(require, _) {
 		}
 		
 		return genericCommentToggle(editor, '/*', '*/', range);
+	}
+	
+	/**
+	 * Returns CSS property from <code>rule</code> that matches passed position
+	 * @param {EditContainer} rule
+	 * @param {Number} absPos
+	 * @returns {EditElement}
+	 */
+	function cssItemFromPosition(rule, absPos) {
+		// do not use default EditContainer.itemFromPosition() here, because
+		// we need to make a few assumptions to make CSS commenting more reliable
+		var relPos = absPos - (rule.options.offset || 0);
+		var reSafeChar = /^[\s\n\r]/;
+		return _.find(rule.list(), function(item) {
+			if (item.range().end === relPos) {
+				// at the end of property, but outside of it
+				// if there’s a space character at current position,
+				// use current property
+				return reSafeChar.test(rule.source.charAt(relPos));
+			}
+			
+			return item.range().inside(relPos);
+		});
 	}
 
 	/**
@@ -8316,7 +8470,7 @@ zen_coding.exec(function(require, _) {
 				// we have a function, find values in it.
 				// but first add function contents
 				stream.start = stream.pos;
-				stream.skipTo(')');
+				stream.skipToPair('(', ')');
 				var fnBody = stream.current();
 				result.push(range.create(clone.start + stream.start, fnBody));
 				
@@ -8913,9 +9067,24 @@ zen_coding.exec(function(require, _) {
 		});
 			
 		if (r && r.length()) {
-			var num = parseFloat(r.substring(String(editor.getContent())));
-			if (!isNaN(num)) {
+			var strNum = r.substring(String(editor.getContent()));
+			var num = parseFloat(strNum);
+			if (!_.isNaN(num)) {
 				num = utils.prettifyNumber(num + step);
+				
+				// do we have zero-padded number?
+				if (/^(\-?)0+[1-9]/.test(strNum)) {
+					var minus = '';
+					if (RegExp.$1) {
+						minus = '-';
+						num = num.substring(1);
+					}
+						
+					var parts = num.split('.');
+					parts[0] = utils.zeroPadString(parts[0], intLength(strNum));
+					num = minus + parts.join('.');
+				}
+				
 				editor.replaceContent(num, r.start, r.end);
 				editor.createSelection(r.start, r.start + num.length);
 				return true;
@@ -8923,6 +9092,19 @@ zen_coding.exec(function(require, _) {
 		}
 		
 		return false;
+	}
+	
+	/**
+	 * Returns length of integer part of number
+	 * @param {String} num
+	 */
+	function intLength(num) {
+		num = num.replace(/^\-/, '');
+		if (~num.indexOf('.')) {
+			return num.split('.')[0].length;
+		}
+		
+		return num.length;
 	}
 	
 	var actions = require('actions');
@@ -9423,8 +9605,8 @@ zen_coding.define('cssResolver', function(require, _) {
 	
 	// properties list is created from cssFeatures.html file
 	var props = {
-		'webkit': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-clip, background-composite, background-origin, background-size, border-fit, border-horizontal-spacing, border-image, border-vertical-spacing, box-align, box-direction, box-flex, box-flex-group, box-lines, box-ordinal-group, box-orient, box-pack, box-reflect, box-shadow, color-correction, column-break-after, column-break-before, column-break-inside, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-span, column-width, dashboard-region, font-smoothing, highlight, hyphenate-character, hyphenate-limit-after, hyphenate-limit-before, hyphens, line-box-contain, line-break, line-clamp, locale, margin-before-collapse, margin-after-collapse, marquee-direction, marquee-increment, marquee-repetition, marquee-style, mask-attachment, mask-box-image, mask-box-image-outset, mask-box-image-repeat, mask-box-image-slice, mask-box-image-source, mask-box-image-width, mask-clip, mask-composite, mask-image, mask-origin, mask-position, mask-repeat, mask-size, nbsp-mode, perspective, perspective-origin, rtl-ordering, text-combine, text-decorations-in-effect, text-emphasis-color, text-emphasis-position, text-emphasis-style, text-fill-color, text-orientation, text-security, text-stroke-color, text-stroke-width, transform, transform-origin, transform-style, transition-delay, transition-duration, transition-property, transition-timing-function, user-drag, user-modify, user-select, writing-mode, svg-shadow',
-		'moz': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-inline-policy, binding, border-bottom-colors, border-image, border-left-colors, border-right-colors, border-top-colors, box-align, box-direction, box-flex, box-ordinal-group, box-orient, box-pack, box-shadow, box-sizing, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-width, float-edge, font-feature-settings, font-language-override, force-broken-image-icon, hyphens, image-region, orient, outline-radius-bottomleft, outline-radius-bottomright, outline-radius-topleft, outline-radius-topright, perspective, perspective-origin, stack-sizing, tab-size, text-blink, text-decoration-color, text-decoration-line, text-decoration-style, text-size-adjust, transform, transform-origin, transform-style, transition-delay, transition-duration, transition-property, transition-timing-function, user-focus, user-input, user-modify, user-select, window-shadow',
+		'webkit': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-clip, background-composite, background-origin, background-size, border-fit, border-horizontal-spacing, border-image, border-vertical-spacing, box-align, box-direction, box-flex, box-flex-group, box-lines, box-ordinal-group, box-orient, box-pack, box-reflect, box-shadow, color-correction, column-break-after, column-break-before, column-break-inside, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-span, column-width, dashboard-region, font-smoothing, highlight, hyphenate-character, hyphenate-limit-after, hyphenate-limit-before, hyphens, line-box-contain, line-break, line-clamp, locale, margin-before-collapse, margin-after-collapse, marquee-direction, marquee-increment, marquee-repetition, marquee-style, mask-attachment, mask-box-image, mask-box-image-outset, mask-box-image-repeat, mask-box-image-slice, mask-box-image-source, mask-box-image-width, mask-clip, mask-composite, mask-image, mask-origin, mask-position, mask-repeat, mask-size, nbsp-mode, perspective, perspective-origin, rtl-ordering, text-combine, text-decorations-in-effect, text-emphasis-color, text-emphasis-position, text-emphasis-style, text-fill-color, text-orientation, text-security, text-stroke-color, text-stroke-width, transform, transition, transform-origin, transform-style, transition-delay, transition-duration, transition-property, transition-timing-function, user-drag, user-modify, user-select, writing-mode, svg-shadow',
+		'moz': 'animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, appearance, backface-visibility, background-inline-policy, binding, border-bottom-colors, border-image, border-left-colors, border-right-colors, border-top-colors, box-align, box-direction, box-flex, box-ordinal-group, box-orient, box-pack, box-shadow, box-sizing, column-count, column-gap, column-rule-color, column-rule-style, column-rule-width, column-width, float-edge, font-feature-settings, font-language-override, force-broken-image-icon, hyphens, image-region, orient, outline-radius-bottomleft, outline-radius-bottomright, outline-radius-topleft, outline-radius-topright, perspective, perspective-origin, stack-sizing, tab-size, text-blink, text-decoration-color, text-decoration-line, text-decoration-style, text-size-adjust, transform, transform-origin, transform-style, transition, transition-delay, transition-duration, transition-property, transition-timing-function, user-focus, user-input, user-modify, user-select, window-shadow',
 		'ms': 'accelerator, animation, animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, backface-visibility, background-position-x, background-position-y, behavior, block-progression, box-align, box-direction, box-flex, box-line-progression, box-lines, box-ordinal-group, box-orient, box-pack, content-zoom-boundary, content-zoom-boundary-max, content-zoom-boundary-min, content-zoom-chaining, content-zoom-snap, content-zoom-snap-points, content-zoom-snap-type, content-zooming, filter, flow-from, flow-into, font-feature-settings, grid-column, grid-column-align, grid-column-span, grid-columns, grid-layer, grid-row, grid-row-align, grid-row-span, grid-rows, high-contrast-adjust, hyphenate-limit-chars, hyphenate-limit-lines, hyphenate-limit-zone, hyphens, ime-mode, interpolation-mode, layout-flow, layout-grid, layout-grid-char, layout-grid-line, layout-grid-mode, layout-grid-type, line-break, overflow-style, overflow-x, overflow-y, perspective, perspective-origin, perspective-origin-x, perspective-origin-y, scroll-boundary, scroll-boundary-bottom, scroll-boundary-left, scroll-boundary-right, scroll-boundary-top, scroll-chaining, scroll-rails, scroll-snap-points-x, scroll-snap-points-y, scroll-snap-type, scroll-snap-x, scroll-snap-y, scrollbar-arrow-color, scrollbar-base-color, scrollbar-darkshadow-color, scrollbar-face-color, scrollbar-highlight-color, scrollbar-shadow-color, scrollbar-track-color, text-align-last, text-autospace, text-justify, text-kashida-space, text-overflow, text-size-adjust, text-underline-position, touch-action, transform, transform-origin, transform-origin-x, transform-origin-y, transform-origin-z, transform-style, transition, transition-delay, transition-duration, transition-property, transition-timing-function, user-select, word-break, word-wrap, wrap-flow, wrap-margin, wrap-through, writing-mode, zoom',
 		'o': 'dashboard-region, animation, animation-delay, animation-direction, animation-duration, animation-fill-mode, animation-iteration-count, animation-name, animation-play-state, animation-timing-function, border-image, link, link-source, object-fit, object-position, tab-size, table-baseline, transform, transform-origin, transition, transition-delay, transition-duration, transition-property, transition-timing-function, accesskey, input-format, input-required, marquee-dir, marquee-loop, marquee-speed, marquee-style'
 	};
@@ -9486,6 +9668,22 @@ zen_coding.define('cssResolver', function(require, _) {
 	}
 	
 	/**
+	 * Check if passed CSS property support specified vendor prefix 
+	 * @param {String} property
+	 * @param {String} prefix
+	 */
+	function hasPrefix(property, prefix) {
+		var info = vendorPrefixes[prefix];
+		
+		if (!info)
+			info = _.find(vendorPrefixes, function(data) {
+				return data.prefix == prefix;
+			});
+		
+		return info && info.supports && _.include(info.supports, property);
+	}
+	
+	/**
 	 * Search for a list of supported prefixes for CSS property. This list
 	 * is used to generate all-prefixed snippet
 	 * @param {String} property CSS property name
@@ -9494,7 +9692,7 @@ zen_coding.define('cssResolver', function(require, _) {
 	function findPrefixes(property) {
 		var result = [];
 		_.each(vendorPrefixes, function(obj, prefix) {
-			if (obj.supports && _.include(obj.supports, property)) {
+			if (hasPrefix(property, prefix)) {
 				result.push(prefix);
 			}
 		});
@@ -9606,6 +9804,36 @@ zen_coding.define('cssResolver', function(require, _) {
 		 * @memberOf cssResolver
 		 */
 		addPrefix: addPrefix,
+		
+		/**
+		 * Check if passed CSS property supports specified vendor prefix
+		 * @param {String} property
+		 * @param {String} prefix
+		 */
+		supportsPrefix: hasPrefix,
+		
+		/**
+		 * Returns prefixed version of passed CSS property, only if this
+		 * property supports such prefix
+		 * @param {String} property
+		 * @param {String} prefix
+		 * @returns
+		 */
+		prefixed: function(property, prefix) {
+			return hasPrefix(property, prefix) 
+				? '-' + prefix + '-' + property 
+				: property;
+		},
+		
+		/**
+		 * Returns list of all registered vendor prefixes
+		 * @returns {Array}
+		 */
+		listPrefixes: function() {
+			return _.map(vendorPrefixes, function(obj) {
+				return obj.prefix;
+			});
+		},
 		
 		/**
 		 * Returns object describing vendor prefix
@@ -10077,39 +10305,103 @@ zen_coding.define('cssGradient', function(require, _) {
 		return v('right') + ' ' + v('bottom') + ', ' + v('left') + ' ' + v('top');
 	}
 	
+	function getPrefixedNames(name) {
+		var prefixes = prefs.getArray('css.gradient.prefixes');
+		var names = _.map(prefixes, function(p) {
+			return '-' + p + '-' + name;
+		});
+		names.push(name);
+		
+		return names;
+	}
+	
 	/**
 	 * Pastes gradient definition into CSS rule with correct vendor-prefixes
 	 * @param {EditElement} property Matched CSS property
 	 * @param {Object} gradient Parsed gradient
+	 * @param {Range} valueRange If passed, only this range within property 
+	 * value will be replaced with gradient. Otherwise, full value will be 
+	 * replaced
 	 */
-	function pasteGradient(property, gradient) {
+	function pasteGradient(property, gradient, valueRange) {
 		var rule = property.parent;
+		var utils = require('utils');
+		var css = require('cssResolver');
+		/** @type Array */
+		var prefixes = prefs.getArray('css.gradient.prefixes');
 		
 		// first, remove all properties within CSS rule with the same name and
 		// gradient definition
-		_.each(rule.getAll(property.name()), function(item) {
+		_.each(rule.getAll(getPrefixedNames(property.name())), function(item) {
 			if (item != property && /gradient/i.test(item.value())) {
 				rule.remove(item);
 			}
 		});
 		
+		var value = property.value();
+		if (!valueRange)
+			valueRange = require('range').create(0, property.value());
+		
+		var val = function(v) {
+			return utils.replaceSubstring(value, v, valueRange);
+		};
+		
 		// put vanilla-clean gradient definition into current rule
 		var cssGradient = require('cssGradient');
-		property.value(cssGradient.toString(gradient));
+		property.value(val(cssGradient.toString(gradient)));
 		
-		// put vendor-prefixed definitions before current rule
-		_.each(prefs.getArray('css.gradient.prefixes'), function(prefix) {
+		// create list of properties to insert
+		var propsToInsert = [];
+		_.each(prefixes, function(prefix) {
+			var name = css.prefixed(property.name(), prefix);
 			if (prefix == 'webkit' && prefs.get('css.gradient.oldWebkit')) {
 				try {
-					rule.add(property.name(), cssGradient.oldWebkitLinearGradient(gradient), rule.indexOf(property));
+					propsToInsert.push({
+						name: name,
+						value: val(cssGradient.oldWebkitLinearGradient(gradient))
+					});
 				} catch(e) {}
 			}
 			
-			rule.add(property.name(), cssGradient.toString(gradient, prefix), rule.indexOf(property));
+			propsToInsert.push({
+				name: name,
+				value: val(cssGradient.toString(gradient, prefix))
+			});
+		});
+		
+		// sort properties by name length
+		propsToInsert = propsToInsert.sort(function(a, b) {
+			return b.name.length - a.name.length;
+		});
+		
+		// put vendor-prefixed definitions before current rule
+		_.each(propsToInsert, function(prop) {
+			rule.add(prop.name, prop.value, rule.indexOf(property));
 		});
 	}
 	
-	// XXX register expand handler
+	/**
+	 * Search for gradient definition inside CSS property value
+	 */
+	function findGradient(cssProp) {
+		var value = cssProp.value();
+		var cssGradient = require('cssGradient');
+		var gradient = null;
+		var matchedPart = _.find(cssProp.valueParts(), function(part) {
+			return gradient = cssGradient.parse(part.substring(value));
+		});
+		
+		if (matchedPart && gradient) {
+			return {
+				gradient: gradient,
+				valueRange: matchedPart
+			};
+		}
+		
+		return null;
+	}
+	
+	// XXX register expand abbreviation handler
 	/**
 	 * @param {IZenEditor} editor
 	 * @param {String} syntax
@@ -10121,7 +10413,7 @@ zen_coding.define('cssGradient', function(require, _) {
 			return false;
 		
 		// let's see if we are expanding gradient definition
-		var caret = editor.getCaretPos(), gradient;
+		var caret = editor.getCaretPos();
 		/** @type EditContainer */
 		var cssRule = require('cssEditTree').parseFromPosition(info.content, caret, true);
 		if (cssRule) {
@@ -10135,19 +10427,17 @@ zen_coding.define('cssGradient', function(require, _) {
 			}
 			
 			if (cssProp) {
-				// make sure that caret is right after gradient definition
-				var r = _.find(cssProp.valueParts(true), function(range) {
-					return range.end == caret;
-				});
-				
-				if (r && (gradient = require('cssGradient').parse(r.substring(info.content)))) {
+				// make sure that caret is inside property value with gradient 
+				// definition
+				var g = findGradient(cssProp);
+				if (g) {
 					// make sure current property has terminating semicolon
 					cssProp.end(';');
 					
 					var ruleStart = cssRule.options.offset || 0;
 					var ruleEnd = ruleStart + cssRule.toString().length;
 					
-					pasteGradient(cssProp, gradient);
+					pasteGradient(cssProp, g.gradient, g.valueRange);
 					editor.replaceContent(cssRule.toString(), ruleStart, ruleEnd, true);
 					editor.setCaretPos(cssProp.valueRange(true).end);
 					return true;
@@ -10164,22 +10454,29 @@ zen_coding.define('cssGradient', function(require, _) {
 	 */
 	require('reflectCSSValue').addHandler(function(property) {
 		var cssGradient = require('cssGradient');
-		var gradient = cssGradient.parse(property.value());
-		if (!gradient)
+		var utils = require('utils');
+		
+		var g = findGradient(property);
+		if (!g)
 			return false;
 		
+		var value = property.value();
+		var val = function(v) {
+			return utils.replaceSubstring(value, v, g.valueRange);
+		};
+		
 		// reflect value for properties with the same name
-		_.each(property.parent.getAll(property.name()), function(prop) {
+		_.each(property.parent.getAll(getPrefixedNames(property.name())), function(prop) {
 			if (prop === property)
 				return;
 			
 			// check if property value starts with gradient definition
 			var m = prop.value().match(/^\s*(\-([a-z]+)\-)?linear\-gradient/);
 			if (m) {
-				prop.value(cssGradient.toString(gradient, m[2] || ''));
+				prop.value(val(cssGradient.toString(g.gradient, m[2] || '')));
 			} else if (m = prop.value().match(/\s*\-webkit\-gradient/)) {
 				// old webkit gradient definition
-				prop.value(cssGradient.oldWebkitLinearGradient(gradient));
+				prop.value(val(cssGradient.oldWebkitLinearGradient(g.gradient)));
 			}
 		});
 		
@@ -10283,29 +10580,6 @@ zen_coding.define('cssGradient', function(require, _) {
 		}
 	};
 });/**
- * Expando (elements like 'dl+') resolver
- * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
- * @param {Function} require
- * @param {Underscore} _
- */
-zen_coding.exec(function(require, _) {
-	var res = require('resources');
-	/**
-	 * @param {TreeNode} node
-	 * @param {String} syntax
-	 */
-	res.addResolver(function(node, syntax) {
-		if (node.isElement() && ~node.name.indexOf('+')) {
-			// it's expando
-			var a = res.getAbbreviation(syntax, node.name);
-			if (a) {
-				return require('transform').createParsedTree(a.data, syntax);
-			}
-		}
-		
-		return null;
-	});
-});/**
  * Module adds support for generators: a regexp-based abbreviation resolver 
  * that can produce custom output.
  * @param {Function} require
@@ -10333,7 +10607,7 @@ zen_coding.exec(function(require, _) {
 			
 			generators.add(function(node, syntax) {
 				var m;
-				if ((m = regexp.exec(node.name))) {
+				if ((m = regexp.exec(node.name()))) {
 					return fn(m, node, syntax);
 				}
 				
@@ -10525,10 +10799,10 @@ zen_coding.exec(function(require, _) {
 	}
 	
 	/**
-	 * @param {ZenNode} item
+	 * @param {AbbreviationNode} item
 	 */
 	function bemParse(item) {
-		if (!require('elements').is(item.source, 'parsedElement'))
+		if (require('abbreviationUtils').isSnippet(item))
 			return item;
 		
 		// save BEM stuff in cache for faster lookups
@@ -10538,7 +10812,7 @@ zen_coding.exec(function(require, _) {
 			modifier: ''
 		};
 		
-		var classNames = normalizeClassName(item.getAttribute('class')).split(' ');
+		var classNames = normalizeClassName(item.attribute('class')).split(' ');
 		
 		// guess best match for block name
 		var reBlockName = /^[a-z]\-/i;
@@ -10560,7 +10834,7 @@ zen_coding.exec(function(require, _) {
 			.uniq()
 			.value();
 		
-		item.setAttribute('class', classNames.join(' '));
+		item.attribute('class', classNames.join(' '));
 		
 		return item;
 	}
@@ -10587,8 +10861,8 @@ zen_coding.exec(function(require, _) {
 	/**
 	 * Processes class name
 	 * @param {String} name Class name item to process
-	 * @param {ZenNode} item Host node for provided class name
-	 * @returns {String} Processed class name. May return <code>Array</code> of
+	 * @param {AbbreviationNode} item Host node for provided class name
+	 * @returns Processed class name. May return <code>Array</code> of
 	 * class names 
 	 */
 	function processClassName(name, item) {
@@ -10617,7 +10891,11 @@ zen_coding.exec(function(require, _) {
 			modifier = blockModifiers.join(separators.modifier);
 		}
 		
-		if (block) {
+		if (block || element || modifier) {
+			if (!block) {
+				block = item.__bem.block;
+			}
+			
 			// inherit parent bem element, if exists
 //			if (item.parent && item.parent.__bem && item.parent.__bem.element)
 //				element = item.parent.__bem.element + separators.element + element;
@@ -10651,7 +10929,7 @@ zen_coding.exec(function(require, _) {
 	/**
 	 * Low-level function to transform user-typed class name into full BEM class
 	 * @param {String} name Class name item to process
-	 * @param {ZenNode} item Host node for provided class name
+	 * @param {AbbreviationNode} item Host node for provided class name
 	 * @param {String} entityType Type of entity to be tried to transform 
 	 * ('element' or 'modifier')
 	 * @returns {String} Processed class name or original one if it can't be
@@ -10723,10 +11001,10 @@ zen_coding.exec(function(require, _) {
 		if (tree.name)
 			bemParse(tree, profile);
 		
-		var elements = require('elements');
+		var abbrUtils = require('abbreviationUtils');
 		_.each(tree.children, function(item) {
 			process(item, profile);
-			if (elements.is(item.source, 'parsedElement') && item.start)
+			if (!abbrUtils.isSnippet(item) && item.start)
 				shouldRunHtmlFilter = true;
 		});
 		
@@ -10761,7 +11039,7 @@ zen_coding.exec(function(require, _) {
 	var prefs = require('preferences');
 	
 	prefs.define('filter.commentAfter', 
-			'\n<%= padding %><!-- /<%= attr("id", "#") %><%= attr("class", ".") %> -->',
+			'\n<!-- /<%= attr("id", "#") %><%= attr("class", ".") %> -->',
 			'A definition of comment that should be placed <i>after</i> matched '
 			+ 'element when <code>comment</code> filter is applied. This definition '
 			+ 'is an ERB-style template passed to <code>_.template()</code> '
@@ -10791,13 +11069,13 @@ zen_coding.exec(function(require, _) {
 			+ 'property');
 	
 	prefs.define('filter.commentTrigger', 'id, class',
-			'A comma-separated list of attribute names that should exist on tag '
+			'A comma-separated list of attribute names that should exist in abbreviatoin '
 			+ 'where comment should be added. If you wish to add comment for '
 			+ 'every element, set this option to <code>*</code>');
 	
 	/**
 	 * Add comments to tag
-	 * @param {ZenNode} node
+	 * @param {AbbreviationNode} node
 	 */
 	function addComments(node, templateBefore, templateAfter) {
 		var utils = require('utils');
@@ -10806,18 +11084,19 @@ zen_coding.exec(function(require, _) {
 		var trigger = prefs.get('filter.commentTrigger');
 		if (trigger != '*') {
 			var shouldAdd = _.find(trigger.split(','), function(name) {
-				return !!node.getAttribute(utils.trim(name));
+				return !!node.attribute(utils.trim(name));
 			});
 			if (!shouldAdd) return;
 		}
 		
 		var ctx = {
 			node: node,
-			name: node.name,
+			name: node.name(),
 			padding: node.parent ? node.parent.padding : '',
 			attr: function(name, before, after) {
-				if (node.getAttribute(name)) {
-					return (before || '') + node.getAttribute(name) + (after || '');
+				var attr = node.attribute(name);
+				if (attr) {
+					return (before || '') + attr + (after || '');
 				}
 				
 				return '';
@@ -10832,9 +11111,9 @@ zen_coding.exec(function(require, _) {
 	}
 	
 	function process(tree, before, after) {
-		var elements = require('elements');
+		var abbrUtils = require('abbreviationUtils');
 		_.each(tree.children, function(item) {
-			if (item.isBlock() && elements.is(item.source, 'parsedElement'))
+			if (abbrUtils.isBlock(item))
 				addComments(item, before, after);
 			
 			process(item, before, after);
@@ -10871,6 +11150,7 @@ zen_coding.exec(function(require, _) {
 		_.each(tree.children, function(item) {
 			item.start = escapeChars(item.start);
 			item.end = escapeChars(item.end);
+			item.content = escapeChars(item.content);
 			process(item);
 		});
 		
@@ -10888,8 +11168,8 @@ zen_coding.exec(function(require, _) {
  * @memberOf __formatFilterDefine
  * @param {Function} require
  * @param {Underscore} _
- */zen_coding.exec(function(require, _){
-	var childToken = '${child}';
+ */
+zen_coding.exec(function(require, _){
 	var placeholder = '%s';
 	
 	function getIndentation() {
@@ -10898,145 +11178,110 @@ zen_coding.exec(function(require, _) {
 	
 	/**
 	 * Test if passed node has block-level sibling element
-	 * @param {ZenNode} item
+	 * @param {AbbreviationNode} item
 	 * @return {Boolean}
 	 */
 	function hasBlockSibling(item) {
-		return item.parent && item.parent.hasBlockChildren();
+		return item.parent && require('abbreviationUtils').hasBlockChildren(item.parent);
 	}
 	
 	/**
-	 * Test if passed item is very first child of the whole tree
-	 * @param {ZenNode} tree
+	 * Test if passed item is very first child in parsed tree
+	 * @param {AbbreviationNode} item
 	 */
 	function isVeryFirstChild(item) {
-		return item.parent && !item.parent.parent && !item.previousSibling;
+		return item.parent && !item.parent.parent && !item.index();
 	}
 	
 	/**
-	 * Need to add line break before element
-	 * @param {ZenNode} node
-	 * @param {Object} profile
+	 * Check if a newline should be added before element
+	 * @param {AbbreviationNode} node
+	 * @param {OutputProfile} profile
 	 * @return {Boolean}
 	 */
-	function shouldBreakLine(node, profile) {
-		if (!profile.inline_break)
-			return false;
-			
-		// find topmost non-inline sibling
-		while (node.previousSibling && node.previousSibling.isInline())
-			node = node.previousSibling;
+	function shouldAddLineBreak(node, profile) {
+		var abbrUtils = require('abbreviationUtils');
+		if (profile.tag_nl === true || abbrUtils.isBlock(node))
+			return true;
 		
-		if (!node.isInline())
+		if (!node.parent || !profile.inline_break)
 			return false;
-			
-		// calculate how many inline siblings we have
-		var nodeCount = 1;
-		while (node = node.nextSibling) {
-			if (node.type == 'text' || !node.isInline())
+		
+		// check if there are required amount of adjacent inline element
+		var nodeCount = 0;
+		return !!_.find(node.parent.children, function(child) {
+			if (child.isTextNode() || !abbrUtils.isInline(child))
 				nodeCount = 0;
-			else if (node.isInline())
+			else if (abbrUtils.isInline(child))
 				nodeCount++;
-		}
-		
-		return nodeCount >= profile.inline_break;
+			
+			if (nodeCount >= profile.inline_break)
+				return true;
+		});
 	}
 	
 	/**
 	 * Need to add newline because <code>item</code> has too many inline children
-	 * @param {ZenNode} node
-	 * @param {Object} profile
+	 * @param {AbbreviationNode} node
+	 * @param {OutputProfile} profile
 	 */
 	function shouldBreakChild(node, profile) {
 		// we need to test only one child element, because 
 		// hasBlockChildren() method will do the rest
-		return node.children.length && shouldBreakLine(node.children[0], profile);
+		return node.children.length && shouldAddLineBreak(node.children[0], profile);
 	}
 	
 	/**
-	 * Processes element with <code>snippet</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
+	 * Processes element with matched resource of type <code>snippet</code>
+	 * @param {AbbreviationNode} item
+	 * @param {OutputProfile} profile
 	 * @param {Number} level Depth level
 	 */
 	function processSnippet(item, profile, level) {
-		var utils = require('utils');
-		var data = item.source.value;
-		var nl = utils.getNewline();
-			
-		if (!data)
-			// snippet wasn't found, process it as tag
-			return processTag(item, profile, level);
-			
-		item.start = item.end = placeholder;
-		
-		var padding = item.parent 
-			? item.parent.padding
-			: utils.repeatString(getIndentation(), level);
-		
 		if (!isVeryFirstChild(item)) {
-			item.start = nl + padding + item.start;
+			item.start = require('utils').getNewline() + item.start;
 		}
-		
-		// adjust item formatting according to last line of <code>start</code> property
-		var parts = data.split(childToken);
-		var lines = utils.splitByLines(parts[0] || '');
-		var paddingDelta = getIndentation();
-			
-		if (lines.length > 1) {
-			var m = lines[lines.length - 1].match(/^(\s+)/);
-			if (m)
-				paddingDelta = m[1];
-		}
-		
-		item.padding = padding + paddingDelta;
 		
 		return item;
 	}
 	
 	/**
 	 * Processes element with <code>tag</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
-	 * @param {Number} [level] Depth level
+	 * @param {AbbreviationNode} item
+	 * @param {OutputProfile} profile
+	 * @param {Number} level Depth level
 	 */
 	function processTag(item, profile, level) {
-		if (!item.name)
-			// looks like it's a root element
-			return item;
-		
 		item.start = item.end = placeholder;
 		var utils = require('utils');
-		var isUnary = (item.isUnary() && !item.children.length);
+		var abbrUtils = require('abbreviationUtils');
+		var isUnary = abbrUtils.isUnary(item);
 		var nl = utils.getNewline();
 			
 		// formatting output
 		if (profile.tag_nl !== false) {
-			var padding = item.parent 
-				? item.parent.padding
-				: utils.repeatString(getIndentation(), level);
 			var forceNl = profile.tag_nl === true;
-			var shouldBreak = shouldBreakLine(item, profile);
 			
 			// formatting block-level elements
-			if (item.type != 'text') {
-				if (( (item.isBlock() || shouldBreak) && item.parent) || forceNl) {
-					// snippet children should take different formatting
-					if (!item.parent || (item.parent.type != 'snippet' && !isVeryFirstChild(item)))
-						item.start = nl + padding + item.start;
+			if (!item.isTextNode()) {
+				if (shouldAddLineBreak(item, profile)) {
+					// - do not indent the very first element
+					// - do not indent first child of a snippet
+					if (!isVeryFirstChild(item) && (!abbrUtils.isSnippet(item.parent) || item.index()))
+						item.start = nl + item.start;
 						
-					if (item.hasBlockChildren() || shouldBreakChild(item, profile) || (forceNl && !isUnary))
-						item.end = nl + padding + item.end;
+					if (abbrUtils.hasBlockChildren(item) || shouldBreakChild(item, profile) || (forceNl && !isUnary))
+						item.end = nl + item.end;
 						
-					if (item.hasTagsInContent() || (forceNl && !item.hasChildren() && !isUnary))
-						item.start += nl + padding + getIndentation();
-				} else if (item.isInline() && hasBlockSibling(item) && !isVeryFirstChild(item)) {
-					item.start = nl + padding + item.start;
-				} else if (item.isInline() && item.hasBlockChildren()) {
-					item.end = nl + padding + item.end;
+					if (abbrUtils.hasTagsInContent(item) || (forceNl && !item.children.length && !isUnary))
+						item.start += nl + getIndentation();
+				} else if (abbrUtils.isInline(item) && hasBlockSibling(item) && !isVeryFirstChild(item)) {
+					item.start = nl + item.start;
+				} else if (abbrUtils.isInline(item) && abbrUtils.hasBlockChildren(item)) {
+					item.end = nl + item.end;
 				}
 				
-				item.padding = padding + getIndentation();
+				item.padding = getIndentation() ;
 			}
 		}
 		
@@ -11045,21 +11290,19 @@ zen_coding.exec(function(require, _) {
 	
 	/**
 	 * Processes simplified tree, making it suitable for output as HTML structure
-	 * @param {ZenNode} tree
-	 * @param {Object} profile
+	 * @param {AbbreviationNode} tree
+	 * @param {OutputProfile} profile
 	 * @param {Number} level Depth level
 	 */
 	require('filters').add('_format', function process(tree, profile, level) {
 		level = level || 0;
-		var utils = require('utils');
+		var abbrUtils = require('abbreviationUtils');
 		
 		_.each(tree.children, function(item) {
-			item = (item.type == 'tag') 
-				? processTag(item, profile, level) 
-				: processSnippet(item, profile, level);
-			
-			if (item.content)
-				item.content = utils.padString(item.content, item.padding);
+			if (abbrUtils.isSnippet(item))
+				processSnippet(item, profile, level);
+			else
+				processTag(item, profile, level);
 			
 			process(item, profile, level + 1);
 		});
@@ -11084,19 +11327,18 @@ zen_coding.exec(function(require, _) {
 	
 	/**
 	 * Creates HAML attributes string from tag according to profile settings
-	 * @param {ZenNode} tag
+	 * @param {AbbreviationNode} tag
 	 * @param {Object} profile
 	 */
 	function makeAttributesString(tag, profile) {
-		var p = require('profile');
-		// make attribute string
 		var attrs = '';
 		var otherAttrs = [];
-		var attrQuote = profile.attr_quotes == 'single' ? "'" : '"';
-		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
+		var attrQuote = profile.attributeQuote();
+		var cursor = profile.cursor();
 		
-		_.each(tag.attributes, function(a) {
-			switch (a.name.toLowerCase()) {
+		_.each(tag.attributeList(), function(a) {
+			var attrName = profile.attributeName(a.name);
+			switch (attrName.toLowerCase()) {
 				// use short notation for ID and CLASS attributes
 				case 'id':
 					attrs += '#' + (a.value || cursor);
@@ -11106,7 +11348,6 @@ zen_coding.exec(function(require, _) {
 					break;
 				// process other attributes
 				default:
-					var attrName = p.stringCase(a.name, profile.attr_case);
 					otherAttrs.push(':' +attrName + ' => ' + attrQuote + (a.value || cursor) + attrQuote);
 			}
 		});
@@ -11115,35 +11356,6 @@ zen_coding.exec(function(require, _) {
 			attrs += '{' + otherAttrs.join(', ') + '}';
 		
 		return attrs;
-	}
-	
-	/**
-	 * Processes element with <code>snippet</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
-	 * @param {Number} level Depth level
-	 */
-	function processSnippet(item, profile, level) {
-		var data = item.source.value;
-		var utils = require('utils');
-			
-		if (!data)
-			// snippet wasn't found, process it as tag
-			return processTag(item, profile, level);
-			
-		var parts = data.split(childToken);
-		var start = parts[0] || '';
-		var end = parts[1] || '';
-		var padding = item.parent ? item.parent.padding : '';
-			
-		item.start = item.start.replace('%s', utils.padString(start, padding));
-		item.end = item.end.replace('%s', utils.padString(end, padding));
-		
-		var cb = require('tabStops').variablesResolver(item);
-		item.start = utils.replaceVariables(item.start, cb);
-		item.end = utils.replaceVariables(item.end, cb);
-		
-		return item;
 	}
 	
 	/**
@@ -11157,24 +11369,26 @@ zen_coding.exec(function(require, _) {
 	
 	/**
 	 * Processes element with <code>tag</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
+	 * @param {AbbreviationNode} item
+	 * @param {OutputProfile} profile
 	 * @param {Number} level Depth level
 	 */
 	function processTag(item, profile, level) {
-		if (!item.name)
+		if (!item.parent)
 			// looks like it's root element
 			return item;
 		
-		var p = require('profile');
+		var abbrUtils = require('abbreviationUtils');
+		var utils = require('utils');
+		
 		var attrs = makeAttributesString(item, profile);
-		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
-		var isUnary = item.isUnary() && !item.children.length;
+		var cursor = profile.cursor();
+		var isUnary = abbrUtils.isUnary(item);
 		var selfClosing = profile.self_closing_tag && isUnary ? '/' : '';
 		var start= '';
 			
 		// define tag name
-		var tagName = '%' + p.stringCase(item.name, profile.tag_case);
+		var tagName = '%' + profile.tagName(item.name());
 		if (tagName.toLowerCase() == '%div' && attrs && attrs.indexOf('{') == -1)
 			// omit div tag
 			tagName = '';
@@ -11185,9 +11399,8 @@ zen_coding.exec(function(require, _) {
 		var placeholder = '%s';
 		// We can't just replace placeholder with new value because
 		// JavaScript will treat double $ character as a single one, assuming
-		// we're using RegExp literal. 
-		var pos = item.start.indexOf(placeholder);
-		item.start = item.start.substring(0, pos) + start + item.start.substring(pos + placeholder.length);
+		// we're using RegExp literal.
+		item.start = utils.replaceSubstring(item.start, start, item.start.indexOf(placeholder), placeholder);
 		
 		if (!item.children.length && !isUnary)
 			item.start += cursor;
@@ -11203,26 +11416,15 @@ zen_coding.exec(function(require, _) {
 	 */
 	require('filters').add('haml', function process(tree, profile, level) {
 		level = level || 0;
-		/** @type zen_coding.utils */
-		var utils = require('utils');
-		var editorUtils = require('editorUtils');
-		var elements = require('elements');
+		var abbrUtils = require('abbreviationUtils');
 		
-		if (level == 0) {
-			// preformat tree
+		if (!level) {
 			tree = require('filters').apply(tree, '_format', profile);
-			require('tabStops').resetPlaceholderCounter();
 		}
 		
 		_.each(tree.children, function(item) {
-			item = elements.is(item.source, 'parsedElement') 
-				? processTag(item, profile, level) 
-				: processSnippet(item, profile, level);
-			
-			// replace counters
-			var counter = editorUtils.getCounterForNode(item);
-			item.start = utils.unescapeText(utils.replaceCounter(item.start, counter));
-			item.end = utils.unescapeText(utils.replaceCounter(item.end, counter));
+			if (!abbrUtils.isSnippet(item))
+				processTag(item, profile, level);
 			
 			process(item, profile, level + 1);
 		});
@@ -11239,84 +11441,45 @@ zen_coding.exec(function(require, _) {
  * @param {Underscore} _
  */
 zen_coding.exec(function(require, _) {
-	var childToken = '${child}';
-	var tabstops = 0;
-		
 	/**
 	 * Creates HTML attributes string from tag according to profile settings
-	 * @param {ZenNode} tag
-	 * @param {Object} profile
+	 * @param {AbbreviationNode} node
+	 * @param {OutputProfile} profile
 	 */
-	function makeAttributesString(tag, profile) {
-		var p = require('profile');
-		// make attribute string
-		var attrQuote = p.quote(profile.attr_quotes);
-		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
+	function makeAttributesString(node, profile) {
+		var attrQuote = profile.attributeQuote();
+		var cursor = profile.cursor();
 		
-		return _.map(tag.attributes, function(a) {
-			var attrName = p.stringCase(a.name, profile.attr_case);
+		return _.map(node.attributeList(), function(a) {
+			var attrName = profile.attributeName(a.name);
 			return ' ' + attrName + '=' + attrQuote + (a.value || cursor) + attrQuote;
 		}).join('');
 	}
 	
 	/**
-	 * Processes element with <code>snippet</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
-	 * @param {Number} level Depth level
-	 */
-	function processSnippet(item, profile, level) {
-		var data = item.source.value;
-		if (!data)
-			// snippet wasn't found, process it as tag
-			return processTag(item, profile, level);
-			
-		var utils = require('utils');
-		var parts = data.split(childToken);
-		var padding = item.parent ? item.parent.padding : '';
-			
-		item.start = item.start.replace('%s', utils.padString(parts[0] || '', padding));
-		item.end = item.end.replace('%s', utils.padString(parts[1] || '', padding));
-		
-		var cb = require('tabStops').variablesResolver(item);
-		item.start = utils.replaceVariables(item.start, cb);
-		item.end = utils.replaceVariables(item.end, cb);
-		
-		return item;
-	}
-	
-	/**
-	 * Test if passed node has block-level sibling element
-	 * @param {ZenNode} item
-	 * @return {Boolean}
-	 */
-	function hasBlockSibling(item) {
-		return item.parent && item.parent.hasBlockChildren();
-	}
-	
-	/**
 	 * Processes element with <code>tag</code> type
-	 * @param {ZenNode} item
-	 * @param {Object} profile
+	 * @param {AbbreviationNode} item
+	 * @param {OutputProfile} profile
 	 * @param {Number} level Depth level
 	 */
 	function processTag(item, profile, level) {
-		if (!item.name) // looks like it's root element
+		if (!item.parent) // looks like it's root element
 			return item;
 		
-		var p = require('profile');
+		var abbrUtils = require('abbreviationUtils');
+		var utils = require('utils');
 		
 		var attrs = makeAttributesString(item, profile); 
-		var cursor = profile.place_cursor ? require('utils').getCaretPlaceholder() : '';
-		var isUnary = item.isUnary() && !item.children.length;
+		var cursor = profile.cursor();
+		var isUnary = abbrUtils.isUnary(item);
 		var start= '';
 		var end = '';
 			
 		// define opening and closing tags
-		if (item.type != 'text') {
-			var tagName = p.stringCase(item.name, profile.tag_case);
+		if (!item.isTextNode()) {
+			var tagName = profile.tagName(item.name());
 			if (isUnary) {
-				start = '<' + tagName + attrs + p.selfClosing(profile.self_closing_tag) + '>';
+				start = '<' + tagName + attrs + profile.selfClosing() + '>';
 				item.end = '';
 			} else {
 				start = '<' + tagName + attrs + '>';
@@ -11327,12 +11490,9 @@ zen_coding.exec(function(require, _) {
 		var placeholder = '%s';
 		// We can't just replace placeholder with new value because
 		// JavaScript will treat double $ character as a single one, assuming
-		// we're using RegExp literal. 
-		var pos = item.start.indexOf(placeholder);
-		item.start = item.start.substring(0, pos) + start + item.start.substring(pos + placeholder.length);
-		
-		pos = item.end.indexOf(placeholder);
-		item.end = item.end.substring(0, pos) + end + item.end.substring(pos + placeholder.length);
+		// we're using RegExp literal.
+		item.start = utils.replaceSubstring(item.start, start, item.start.indexOf(placeholder), placeholder);
+		item.end = utils.replaceSubstring(item.end, end, item.end.indexOf(placeholder), placeholder);
 		
 		if (!item.children.length && !isUnary && item.content.indexOf(cursor) == -1)
 			item.start += cursor;
@@ -11348,30 +11508,15 @@ zen_coding.exec(function(require, _) {
 	 */
 	require('filters').add('html', function process(tree, profile, level) {
 		level = level || 0;
-		var ts = require('tabStops');
+		var abbrUtils = require('abbreviationUtils');
 		
-		if (level == 0) {
+		if (!level) {
 			tree = require('filters').apply(tree, '_format', profile);
-			tabstops = 0;
-			ts.resetPlaceholderCounter();
 		}
 		
-		var utils = require('utils');
-		var editorUtils = require('editorUtils');
-		var elements = require('elements');
-		
 		_.each(tree.children, function(item) {
-			item = elements.is(item.source, 'parsedElement') 
-				? processTag(item, profile, level) 
-				: processSnippet(item, profile, level);
-			
-			// replace counters
-			var counter = editorUtils.getCounterForNode(item);
-			item.start = utils.unescapeText(utils.replaceCounter(item.start, counter));
-			item.end = utils.unescapeText(utils.replaceCounter(item.end, counter));
-			item.content = utils.unescapeText(utils.replaceCounter(item.content, counter));
-			
-			tabstops += ts.upgrade(item, tabstops) + 1;
+			if (!abbrUtils.isSnippet(item))
+				processTag(item, profile, level);
 			
 			process(item, profile, level + 1);
 		});
@@ -11392,9 +11537,10 @@ zen_coding.exec(function(require, _) {
 	var reNl = /[\n\r]/g;
 	
 	require('filters').add('s', function process(tree, profile, level) {
-		var elements = require('elements');
+		var abbrUtils = require('abbreviationUtils');
+		
 		_.each(tree.children, function(item) {
-			if (elements.is(item.source, 'parsedElement')) {
+			if (!abbrUtils.isSnippet(item)) {
 				// remove padding from item 
 				item.start = item.start.replace(rePad, '');
 				item.end = item.end.replace(rePad, '');
@@ -11471,10 +11617,10 @@ zen_coding.exec(function(require, _) {
 	}
 	
 	require('filters').add('xsl', function process(tree) {
-		var elements = require('elements');
+		var abbrUtils = require('abbreviationUtils');
 		_.each(tree.children, function(item) {
-			if (elements.is(item.source, 'parsedElement')
-					&& (item.name || '').toLowerCase() in tags 
+			if (!abbrUtils.isSnippet(item)
+					&& (item.name() || '').toLowerCase() in tags 
 					&& item.children.length)
 				trimAttribute(item);
 			process(item);
@@ -11502,48 +11648,28 @@ zen_coding.exec(function(require, _) {
  */
 zen_coding.exec(function(require, _) {
 	/**
-	 * @param {Array} match
-	 * @param {TreeNode} node
-	 * @param {String} syntax
+	 * @param {AbbreviationNode} tree
+	 * @param {Object} options
 	 */
-	require('resources').addGenerator(/^(?:lorem|lipsum)(\d*)$/i, function(match, node, syntax) {
-		var wordCound = match[1] || 30;
-		var elemName = '';
-		var outputCount = node.count || 1;
+	require('abbreviationParser').addPreprocessor(function(tree, options) {
+		var re = /^(?:lorem|lipsum)(\d*)$/i, match;
 		
-		if (!elemName && node.parent.name) {
-			// guess element name from TreeNode
-			elemName = require('tagName').getMapping(node.parent.name);
-		}
-		
-		// if output tag name is undefined and user wants to output more than one
-		// block, assume the element name is "P"
-		if (!elemName && outputCount > 1) {
-			elemName = 'p';
-		}
-		
-		var elem = require('elements').create('parsedElement', node, syntax, elemName || '');
-		// override 'getContent()' method so it will output lorem ipsum dynamically,
-		// when tree will be rolled out
-		elem._content = function(el) {
-			var isStarted = !!el.options.loremStarted;
-			el.options.loremStarted = true;
-			return paragraph(wordCound, !isStarted);
-		};
-		
-		return elem;
+		/** @param {AbbreviationNode} node */
+		tree.findAll(function(node) {
+			if (node._name && (match = node._name.match(re))) {
+				var wordCound = match[1] || 30;
+				
+				// force node name resolving if node should be repeated
+				// or contains attributes. In this case, node should be outputtet
+				// as tag, otherwise as text-only node
+				node._name = '';
+				node.data('forceNameResolving', node.isRepeating() || node.attributeList().length);
+				node.data('paste', function(i, content) {
+					return paragraph(wordCound, !i);
+				});
+			}
+		});
 	});
-	
-	/**
-	 * Find root element
-	 * @param {TreeNode} node
-	 * @returns {TreeNode}
-	 */
-	function findRoot(node) {
-		while (node.parent)
-			node = node.parent;
-		return node;
-	}
 	
 	var COMMON_P = 'lorem ipsum dolor sit amet consectetur adipisicing elit'.split(' ');
 	
@@ -11581,7 +11707,7 @@ zen_coding.exec(function(require, _) {
 	 * Returns random integer between <code>from</code> and <code>to</code> values
 	 * @param {Number} from
 	 * @param {Number} to
-	 * @returns {String}
+	 * @returns {Number}
 	 */
 	function randint(from, to) {
 		return Math.round(Math.random() * (to - from) + from);

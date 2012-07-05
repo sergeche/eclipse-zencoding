@@ -152,6 +152,14 @@ function javaLoadSystemSnippets(data) {
 	}
 }
 
+function javaExtractTabstops(text) {
+	return require('tabStops').extract(text, {
+		escape: function(ch) {
+			return ch;
+		}
+	});
+}
+
 function log(message) {
 	java.lang.System.out.println('JS: ' + message);
 }
