@@ -33,7 +33,7 @@ public class EclipseZenEditor implements IZenEditor {
 
 	private IEditorPart editor;
 	private IDocument doc;
-	private String caretPlaceholder = "{%::zen-caret::%}";
+	private String caretPlaceholder = "${0}";
 	
 	private static Pattern whitespaceBegin = Pattern.compile("^(\\s+)");
 	
@@ -84,10 +84,14 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public SelectionData getCurrentLineRange() {
+		return getLineRangeFromPosition(getCaretPos());
+	}
+	
+	public SelectionData getLineRangeFromPosition(int pos) {
 		SelectionData result = new SelectionData();
 		
 		try {
-			IRegion lineInfo = doc.getLineInformationOfOffset(getCaretPos());
+			IRegion lineInfo = doc.getLineInformationOfOffset(pos);
 			result.updateRangeWithLength(lineInfo.getOffset(), lineInfo.getLength());
 		} catch (BadLocationException e) { }
 		
@@ -106,9 +110,12 @@ public class EclipseZenEditor implements IZenEditor {
 
 	@Override
 	public String getCurrentLine() {
-		SelectionData curLineRange = getCurrentLineRange();
+		return getLineFromRange(getCurrentLineRange());
+	}
+	
+	public String getLineFromRange(SelectionData range) {
 		try {
-			return doc.get(curLineRange.getStart(), curLineRange.getLength());
+			return doc.get(range.getStart(), range.getLength());
 		} catch (BadLocationException e) {
 			return "";
 		}
@@ -132,9 +139,12 @@ public class EclipseZenEditor implements IZenEditor {
 	@Override
 	public void replaceContent(String value, int start, int end, boolean noIndent) {
 		String newValue = value;
-		if (!noIndent)
-			newValue = padString(value, getCurrentLinePadding());
 		
+		if (!noIndent) {
+			String line = getLineFromRange(getLineRangeFromPosition(start));
+			String padding = getStringPadding(line);
+			newValue = padString(value, padding);
+		}
 		
 		TabStopStructure tabStops = new TabStopStructure(newValue);
 		newValue = tabStops.getText();
@@ -154,17 +164,22 @@ public class EclipseZenEditor implements IZenEditor {
 			if (totalLinks > 1 || firstTabStop != null && firstTabStop.getStart() != firstTabStop.getEnd()) {
 				ITextViewer viewer = EclipseZenCodingHelper.getTextViewer(editor);
 				LinkedModeModel model = new LinkedModeModel();
+				int exitPos = -1;
 				
 				for (int i = 0; i < tabGroups.length; i++) {
 					TabStopGroup tabGroup = tabStops.getTabStopGroup(tabGroups[i]);
 					LinkedPositionGroup group = null;
 					
-					if (tabGroups[i].equals("carets")) {
-						for (int j = 0; j < tabGroup.getTabStopList().size(); j++) {
+					if (tabGroups[i].equals("carets") || tabGroups[i].equals("0")) {
+						int caretCount = tabGroup.getTabStopList().size();
+						for (int j = 0; j < caretCount; j++) {
 							TabStop ts = tabGroup.getTabStopList().get(j);
 							group = new LinkedPositionGroup();
 							group.addPosition(new LinkedPosition(doc, start + ts.getStart(), ts.getLength()));
 							model.addGroup(group);
+							if (j == caretCount - 1) {
+								exitPos = start + ts.getStart();
+							}							
 						}
 					} else {
 						group = new LinkedPositionGroup();
@@ -179,8 +194,10 @@ public class EclipseZenEditor implements IZenEditor {
 				}
 				
 				model.forceInstall();
-				
 				LinkedModeUI linkUI = new LinkedModeUI(model, viewer);
+				if (exitPos != -1) {
+					linkUI.setExitPosition(viewer, exitPos, 0, Integer.MAX_VALUE);
+				}
 				
 				// Aptana has a buggy linked mode implementation, use simple 
 				// mode for it 
