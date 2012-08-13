@@ -27,7 +27,7 @@ public class JSExecutor {
 	private static String snippetsJSON = "snippets.json";
 	
 	private static String[] coreFiles = {
-		"zencoding.js", 
+		"zencoding-app.js", 
 		"file-interface.js",
 		"java-wrapper.js"
 	}; 

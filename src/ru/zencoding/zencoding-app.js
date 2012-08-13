@@ -4931,11 +4931,16 @@ zen_coding.define('profile', function(require, _) {
 				}
 			}
 			
+			if (!name)
+				return profiles.plain;
+			
+			if (name instanceof OutputProfile)
+				return name;
 			
 			if (_.isString(name) && name.toLowerCase() in profiles)
 				return profiles[name.toLowerCase()];
-				
-			return name && 'tag_case' in name ? this.create(name) : profiles['plain'];
+			
+			return this.create(name);
 		},
 		
 		/**
@@ -4956,36 +4961,7 @@ zen_coding.define('profile', function(require, _) {
 		 * <i>upper</i> and <i>leave</i>
 		 * @returns {String}
 		 */
-		stringCase: stringCase,
-		
-		/**
-		 * Returns quote character based on profile parameter
-		 * @param {String} param Quote parameter, can be <i>single</i> or
-		 * <i>double</i>
-		 * @returns {String}
-		 * @deprecated
-		 */
-		quote: function(param) {
-			console.log('deprecated');
-			return param == 'single' ? "'" : '"';
-		},
-		
-		/**
-		 * Returns self-closing tag symbol, based on passed parameter
-		 * @param {String} param
-		 * @returns {String}
-		 * @deprecated
-		 */
-		selfClosing: function(param) {
-			console.log('deprecated');
-			if (param == 'xhtml')
-				return ' /';
-			
-			if (param === true)
-				return '/';
-			
-			return '';
-		}
+		stringCase: stringCase
 	};
 });/**
  * Utility module used to prepare text for pasting into back-end editor
@@ -6114,6 +6090,15 @@ zen_coding.define('preferences', function(require, _) {
 	var defaults = {};
 	var _dbgDefaults = null;
 	var _dbgPreferences = null;
+
+	function toBoolean(val) {
+		if (_.isString(val)) {
+			val = val.toLowerCase();
+			return val == 'yes' || val == 'true' || val == '1';
+		}
+
+		return !!val;
+	}
 	
 	function isValueObj(obj) {
 		return _.isObject(obj) 
@@ -6167,6 +6152,18 @@ zen_coding.define('preferences', function(require, _) {
 				
 				// do not set value if it equals to default value
 				if (v !== defaults[k].value) {
+					// make sure we have value of correct type
+					switch (typeof defaults[k].value) {
+						case 'boolean':
+							v = toBoolean(v);
+							break;
+						case 'number':
+							v = parseInt(v + '', 10) || 0;
+							break;
+						default: // convert to string
+							v += '';
+					}
+
 					preferences[k] = v;
 				} else if  (k in preferences) {
 					delete preferences[p];
@@ -6242,6 +6239,7 @@ zen_coding.define('preferences', function(require, _) {
 				return {
 					name: key,
 					value: this.get(key),
+					type: typeof defaults[key].value,
 					description: defaults[key].description
 				};
 			}, this);
@@ -6256,6 +6254,14 @@ zen_coding.define('preferences', function(require, _) {
 			_.each(json, function(value, key) {
 				this.set(key, value);
 			}, this);
+		},
+
+		/**
+		 * Returns hash of user-modified preferences
+		 * @returns {Object}
+		 */
+		exportModified: function() {
+			return _.clone(preferences);
 		},
 		
 		/**
@@ -9619,6 +9625,14 @@ zen_coding.define('cssResolver', function(require, _) {
 			'Defines a symbol that should be placed between CSS property and ' 
 			+ 'value when expanding CSS abbreviations.');
 	
+	prefs.define('css.autoInsertVendorPrefixes', true,
+			'Automatically generate vendor-prefixed copies of expanded CSS ' 
+			+ 'property. By default, Zen Coding will generate vendor-prefixed ' +
+			+ 'properties only when you put dash before abbreviation ' 
+			+ '(e.g. <code>-bxsh</code>). With this option enabled, you don’t ' 
+			+ 'need dashes before abbreviations: Zen Coding will produce ' 
+			+ 'vendor-prefixed properties for you.');
+	
 	var descTemplate = _.template('A comma-separated list of CSS properties that may have ' 
 		+ '<code><%= vendor %></code> vendor prefix. This list is used to generate '
 		+ 'a list of prefixed properties when expanding <code>-property</code> '
@@ -9682,10 +9696,13 @@ zen_coding.define('cssResolver', function(require, _) {
 			};
 		}
 		
-		var pair = snippet.split(':', 2);
+		var pair = snippet.split(':');
+		
 		return {
-			name: utils.trim(pair[0]),
-			value: utils.trim(pair[1])
+			name: utils.trim(pair.shift()),
+			// replace ${0} tabstop since to produce valid vendor-prefixed values
+			// where possible
+			value: utils.trim(pair.join(':')).replace(/^(\$\{0\}|\$0)(\s*;?)$/, '\$$2')
 		};
 	}
 	
@@ -9711,7 +9728,7 @@ zen_coding.define('cssResolver', function(require, _) {
 	 * @param {String} property CSS property name
 	 * @returns {Array}
 	 */
-	function findPrefixes(property) {
+	function findPrefixes(property, noAutofill) {
 		var result = [];
 		_.each(vendorPrefixes, function(obj, prefix) {
 			if (hasPrefix(property, prefix)) {
@@ -9719,7 +9736,7 @@ zen_coding.define('cssResolver', function(require, _) {
 			}
 		});
 		
-		if (!result.length) {
+		if (!result.length && !noAutofill) {
 			// add all non-obsolete prefixes
 			_.each(vendorPrefixes, function(obj, prefix) {
 				if (!obj.obsolete)
@@ -10058,11 +10075,12 @@ zen_coding.define('cssResolver', function(require, _) {
 		 * Expands abbreviation into a snippet
 		 * @param {String} abbr Abbreviation name to expand
 		 * @param {String} value Abbreviation value
-		 * @returns {Array} Array of CSS properties and values or predefined
+		 * @returns {Object} Array of CSS properties and values or predefined
 		 * snippet (string or element)
 		 */
 		expand: function(abbr, value) {
 			var resources = require('resources');
+			var autoInsertPrefixes = prefs.get('css.autoInsertVendorPrefixes');
 			
 			// check if snippet should be transformed to !important
 			var isImportant;
@@ -10072,8 +10090,9 @@ zen_coding.define('cssResolver', function(require, _) {
 			
 			// check if we have abbreviated resource
 			var snippet = resources.getSnippet('css', abbr);
-			if (snippet)
+			if (snippet && !autoInsertPrefixes) {
 				return transformSnippet(snippet, isImportant);
+			}
 			
 			// no abbreviated resource, parse abbreviation
 			var prefixData = this.extractPrefixes(abbr);
@@ -10102,20 +10121,20 @@ zen_coding.define('cssResolver', function(require, _) {
 			
 			snippetObj.value = value || snippetObj.value;
 			
-			if (abbrData.prefixes) {
-				var prefixes = abbrData.prefixes == 'all' 
-					? findPrefixes(snippetObj.name)
-					: abbrData.prefixes;
-					
+			var prefixes = abbrData.prefixes == 'all' || autoInsertPrefixes 
+				? findPrefixes(snippetObj.name, autoInsertPrefixes && abbrData.prefixes != 'all')
+				: abbrData.prefixes;
+				
 				_.each(prefixes, function(p) {
 					if (p in vendorPrefixes) {
 						result.push(transformSnippet(
-							vendorPrefixes[p].transformName(snippetObj.name) 
-							+ ':' + snippetObj.value,
-							isImportant));
+								vendorPrefixes[p].transformName(snippetObj.name) 
+								+ ':' + snippetObj.value,
+								isImportant));
 						
 					}
 				});
+			if (abbrData.prefixes || autoInsertPrefixes) {
 			}
 			
 			// put the original property
@@ -11821,4 +11840,174 @@ zen_coding.exec(function(require, _) {
 		
 		return result.join(' ');
 	}
+});/**
+ * A back-end bootstrap module with commonly used methods for loading user data
+ * @param {Function} require
+ * @param {Underscore} _  
+ */
+zen_coding.define('bootstrap', function(require, _) {
+	
+	/**
+	 * Returns file name part from path
+	 * @param {String} path Path to file
+	 * @return {String}
+	 */
+	function getFileName(path) {
+		var re = /([\w\.\-]+)$/i;
+		var m = re.exec(path);
+		return m ? m[1] : '';
+	}
+	
+	/**
+	 * Returns base path (path to folder of file)
+	 * @param {String} path Path to file
+	 * @return {String}
+	 */
+	function getBasePath(path) {
+		return path.substring(0, path.length - getFileName(path).length);
+	}
+	
+	return {
+		/**
+		 * Loads Zen Coding extensions. Extensions are simple .js files that
+		 * uses Zen Coding modules and resources to create new actions, modify
+		 * existing ones etc.
+		 * @param {Array} fileList List of absolute paths to files in extensions 
+		 * folder. Back-end app should not filter this list (e.g. by extension) 
+		 * but return it "as-is" so bootstrap can decide how to load contents 
+		 * of each file.
+		 * This method requires a <code>file</code> module of <code>IZenFile</code> 
+		 * interface to be implemented.
+		 */
+		loadExtensions: function(fileList) {
+			var file = require('file');
+			var payload = {};
+			_.each(fileList, function(f) {
+				switch (file.getExt(f)) {
+					case 'js':
+						try {
+							eval(file.read(f));
+						} catch (e) {
+							zen_coding.log('Unable to eval "' + f + '" file: '+ e);
+						}
+						break;
+					case 'json':
+						var fileName = getFileName(f).toLowerCase().replace(/\.json$/, '');
+						payload[fileName] = file.read(f);
+						break;
+				}
+			});
+			
+			this.loadUserData(payload);
+		},
+		
+		/**
+		 * Loads preferences from JSON object (or string representation of JSON)
+		 * @param {Object} data
+		 * @returns
+		 */
+		loadPreferences: function(data) {
+			require('preferences').load(this.parseJSON(data));
+		},
+		
+		/**
+		 * Loads user snippets and abbreviations. It doesn’t replace current
+		 * user resource vocabulary but merges it with passed one. If you need 
+		 * to <i>replaces</i> user snippets you should call 
+		 * <code>resetSnippets()</code> method first
+		 */
+		loadSnippets: function(data) {
+			data = this.parseJSON(data);
+			
+			var res = require('resources');
+			var userData = res.getVocabulary('user') || {};
+			res.setVocabulary(require('utils').deepMerge(userData, data), 'user');
+		},
+		
+		/**
+		 * Helper function that loads default snippets, defined in project’s
+		 * <i>snippets.json</i>
+		 * @param {Object} data
+		 */
+		loadSystemSnippets: function(data) {
+			require('resources').setVocabulary(this.parseJSON(data), 'system');
+		},
+		
+		/**
+		 * Removes all user-defined snippets
+		 */
+		resetSnippets: function() {
+			require('resources').setVocabulary({}, 'user');
+		},
+		
+		/**
+		 * Helper function that loads all user data (snippets and preferences)
+		 * defined as a single JSON object. This is useful for loading data 
+		 * stored in a common storage, for example <code>NSUserDefaults</code>
+		 * @param {Object} data
+		 */
+		loadUserData: function(data) {
+			data = this.parseJSON(data);
+			if (data.snippets) {
+				this.loadSnippets(data.snippets);
+			}
+			
+			if (data.preferences) {
+				this.loadPreferences(data.preferences);
+			}
+			
+			if (data.profiles) {
+				this.loadProfiles(data.profiles);
+			}
+			
+			if (data.syntaxProfiles) {
+				this.loadSyntaxProfiles(data.syntaxProfiles);
+			}
+		},
+		
+		/**
+		 * Load syntax-specific output profiles. These are essentially 
+		 * an extension to syntax snippets 
+		 * @param {Object} profiles Dictionary of profiles
+		 */
+		loadSyntaxProfiles: function(profiles) {
+			profiles = this.parseJSON(profiles);
+			var snippets = {};
+			_.each(profiles, function(options, syntax) {
+				if (!(syntax in snippets)) {
+					snippets[syntax] = {};
+				}
+				snippets[syntax].profile = options;
+			});
+			
+			this.loadSnippets(snippets);
+		},
+		
+		/**
+		 * Load named profiles
+		 * @param {Object} profiles
+		 */
+		loadProfiles: function(profiles) {
+			var profile = require('profile');
+			_.each(this.parseJSON(profiles), function(options, name) {
+				profile.create(name, options);
+			});
+		},
+		
+		/**
+		 * Dead simple string-to-JSON parser
+		 * @param {String} str
+		 * @returns {Object}
+		 */
+		parseJSON: function(str) {
+			if (_.isObject(str))
+				return str;
+			
+			try {
+				return (new Function('return ' + str))();
+			} catch(e) {
+				return {};
+			}
+		}
+	};
 });
