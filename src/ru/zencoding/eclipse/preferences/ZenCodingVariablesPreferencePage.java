@@ -16,14 +16,13 @@ public class ZenCodingVariablesPreferencePage extends VariablePreferencePage
 	
 	@Override
 	public boolean performOk() {
-		JSExecutor.getSingleton().reloadUserSettings();
+		JSExecutor.reset();
 		return super.performOk();
 	}
 	
 	@Override
 	protected void performDefaults() {
+		JSExecutor.reset();
 		super.performDefaults();
-		JSExecutor.getSingleton().reloadUserSettings();
 	}
-
 }

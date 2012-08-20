@@ -34,6 +34,8 @@ public class EclipseZenCodingPlugin extends AbstractUIPlugin {
 		super.start(context);
 		plugin = this;
 		
+		JSExecutor.setUserDataDelegate(new EclipseUserData());
+		
 		// XXX maybe there's a better place for such listener?
 		getDefault().getPreferenceStore().addPropertyChangeListener(new IPropertyChangeListener() {
 			@Override

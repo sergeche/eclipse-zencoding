@@ -7,6 +7,7 @@ import org.eclipse.jface.preference.StringFieldEditor;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 
+import ru.zencoding.JSExecutor;
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
 import ru.zencoding.eclipse.preferences.PreferenceConstants;
 import ru.zencoding.eclipse.preferences.PreferenceInitializer;
@@ -122,5 +123,16 @@ public class DefaultOutputPreferencePage extends FieldEditorPreferencePage
 	public String getPrefSuffix() {
 		return prefSuffix;
 	}
-
+	
+	@Override
+	public boolean performOk() {
+		JSExecutor.reset();
+		return super.performOk();
+	}
+	
+	@Override
+	protected void performDefaults() {
+		JSExecutor.reset();
+		super.performDefaults();
+	}
 }

@@ -1,39 +1,28 @@
 package ru.zencoding;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FilenameFilter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 
-import org.eclipse.jface.preference.IPreferenceStore;
-import org.eclipse.jface.text.templates.Template;
-import org.eclipse.jface.text.templates.persistence.TemplateStore;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
-
-import ru.zencoding.eclipse.EclipseTemplateProcessor;
-import ru.zencoding.eclipse.EclipseZenCodingPlugin;
-import ru.zencoding.eclipse.preferences.PreferenceConstants;
-import ru.zencoding.eclipse.preferences.TemplateHelper;
-import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
 public class JSExecutor {
 	private volatile static JSExecutor singleton;
 	private static Context cx;
 	private static Scriptable scope;
-	private static boolean inited = false; 
 	private static String snippetsJSON = "snippets.json";
+	private static IUserData userDataDelegate = null;
+	
 	
 	private static String[] coreFiles = {
-		"zencoding-app.js", 
+		"zencoding-app.js",
+//		"json2.js",
 		"file-interface.js",
 		"java-wrapper.js"
 	}; 
 	
 	private JSExecutor() {
-		inited = false;
 		cx = Context.enter();
 		scope = cx.initStandardObjects();
 		try {
@@ -42,11 +31,13 @@ public class JSExecutor {
 				cx.evaluateReader(scope, getReaderForLocalFile(coreFiles[i]), coreFiles[i], 1, null);
 			}
 			
-			// load snippets
+			// load default snippets
 			execJSFunction("javaLoadSystemSnippets", readLocalFile(snippetsJSON));
 			
-			loadExtensions(cx, scope);
-			inited = true;
+			if (userDataDelegate != null) {
+				userDataDelegate.load(this);
+				userDataDelegate.loadExtensions(this);
+			}
 		} catch (Exception e) {
 			System.err.println(e.getMessage());
 		}
@@ -57,11 +48,14 @@ public class JSExecutor {
 			synchronized (JSExecutor.class) {
 				if (singleton == null) {
 					singleton = new JSExecutor();
-					singleton.reloadUserSettings();
 				}
 			}
 		}
 		return singleton;
+	}
+	
+	public static void setUserDataDelegate(IUserData delegate) {
+		userDataDelegate = delegate;
 	}
 	
 	public static void reset() {
@@ -88,10 +82,6 @@ public class JSExecutor {
 	    } catch (java.util.NoSuchElementException e) {
 	        return "";
 	    }
-	}
-	
-	public boolean isInited() {
-		return inited;
 	}
 	
 	/**
@@ -131,104 +121,13 @@ public class JSExecutor {
 	 * @return 'True' if action was successfully executed
 	 */
 	public boolean runAction(Object... args) {
-		if (isInited()) {
-			return Context.toBoolean(execJSFunction("runZenCodingAction", args));
-		}
-		
-		return false;
-	}
-	
-	/**
-	 * Reloads user-defined Zen Coding abbreviations and snippets: removes old
-	 * and adds new ones
-	 */
-	public void reloadUserSettings() {
-		if (isInited()) {
-			execJSFunction("resetUserSettings");
-			saveSettings("abbreviations");
-			saveSettings("snippets");
-			saveVariables();
-		}
-	}
-	
-	private void saveSettings(String type) {
-		TemplateStore storage = TemplateHelper.getTemplateStore(type);
-		Template[] templates = storage.getTemplates();
-		for (Template template : templates) {
-			String ctxId = template.getContextTypeId();
-			String syntax = ctxId.substring(ctxId.lastIndexOf('.') + 1);
-			
-			execJSFunction("addUserResource", syntax, type, template.getName(),
-					EclipseTemplateProcessor.process(template.getPattern()));
-		}
-	}
-	
-	private void saveVariables() {
-		TemplateStore storage = TemplateHelper.getVariableStore();
-		Template[] templates = storage.getTemplates();
-		for (Template template : templates) {
-			execJSFunction("addUserVariable", template.getName(), 
-					EclipseTemplateProcessor.process(template.getPattern()));
-		}
-	}
-	
-	public void setupProfile(String name, OutputProfile profile) {
-		execJSFunction("setupOutputProfile", name, profile);
-	}
-	
-	/**
-	 * Check if Zen Coding has predefined variable of that name
-	 * @param name
-	 * @return
-	 */
-	public boolean hasVariable(String name) {
-		if (isInited()) {
-			return Context.toBoolean(execJSFunction("hasZenCodingVariable", name));
-		}
-		
-		return false;
+		return Context.toBoolean(execJSFunction("runZenCodingAction", args));
 	}
 	
 	/**
 	 * Returns preview for "Wrap with Abbreviation" action
 	 */
 	public String getWrapPreview(IZenEditor editor, String abbr) {
-		if (isInited()) {
-			return Context.toString(execJSFunction("previewWrapWithAbbreviation", editor, abbr));
-		}
-		
-		return null;
-	}
-	
-	/**
-	 * Loads Zen Coding extensions from folder
-	 * @param cx
-	 * @param scope
-	 */
-	private void loadExtensions(Context cx, Scriptable scope) {
-		IPreferenceStore store = EclipseZenCodingPlugin.getDefault().getPreferenceStore();
-		String extensionsPath = store.getString(PreferenceConstants.P_EXTENSIONS_PATH);
-		if (extensionsPath != null && extensionsPath.length() > 0) {
-			File extDir = new File(extensionsPath);
-			if (extDir.exists() && extDir.isDirectory()) {
-				File[] files = extDir.listFiles(new FilenameFilter() {
-					@Override
-					public boolean accept(File dir, String name) {
-						return name.endsWith(".js");
-					}
-				});
-				
-				FileInputStream fis = null;
-				for (File file : files) {
-					try {
-						fis = new FileInputStream(file);
-						cx.evaluateReader(scope, new InputStreamReader(fis), file.getName(), 1, null);
-					} catch (Exception e) {
-						e.printStackTrace();
-					}
-				}
-			}
-			
-		}
+		return Context.toString(execJSFunction("previewWrapWithAbbreviation", editor, abbr));
 	}
 }

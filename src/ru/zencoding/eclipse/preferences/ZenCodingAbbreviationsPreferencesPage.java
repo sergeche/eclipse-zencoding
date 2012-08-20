@@ -28,14 +28,13 @@ public class ZenCodingAbbreviationsPreferencesPage extends TemplatePreferencePag
 
 	@Override
 	public boolean performOk() {
-		// TODO if JSExecutor is not created yet, don't reload settings
-		JSExecutor.getSingleton().reloadUserSettings();
+		JSExecutor.reset();
 		return super.performOk();
 	}
 	
 	@Override
 	protected void performDefaults() {
+		JSExecutor.reset();
 		super.performDefaults();
-		JSExecutor.getSingleton().reloadUserSettings();
 	}
 }

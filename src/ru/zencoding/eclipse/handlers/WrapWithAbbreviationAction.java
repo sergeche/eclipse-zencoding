@@ -6,7 +6,6 @@ import org.eclipse.core.commands.ExecutionException;
 
 import ru.zencoding.JSExecutor;
 import ru.zencoding.eclipse.EclipseZenEditor;
-import ru.zencoding.eclipse.preferences.output.OutputProfile;
 
 public class WrapWithAbbreviationAction extends AbstractHandler {
 
@@ -19,18 +18,12 @@ public class WrapWithAbbreviationAction extends AbstractHandler {
 		
 		if (editor != null) {
 			try {
-				// setup output profile
-				String syntax = editor.getSyntax();
-				
-				OutputProfile profile = OutputProfile.createFromPreferences(syntax);
-				js.setupProfile(profileName, profile);
-				
 				String abbr = editor.promptWrap("Enter abbreviation:");
 				
 				if (abbr != null && !abbr.equals("")) {
 					// expand abbreviation with current profile
 					return js.runAction(editor, "wrap_with_abbreviation", 
-							abbr, syntax, profileName);
+							abbr, editor.getSyntax(), profileName);
 				}
 				
 			} catch (Exception e) {

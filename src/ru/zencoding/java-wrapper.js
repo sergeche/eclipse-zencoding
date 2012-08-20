@@ -23,38 +23,6 @@ function runZenCodingAction(editor, actionName){
 	return require('actions').run(actionName, args);
 }
 
-/**
- * Removes all user defined settings
- */
-function resetUserSettings() {
-	require('resources').setVocabulary({}, 'user');
-}
-
-/**
- * Adds user defined resource (abbreviation or snippet)
- * @param {String} syntax
- * @param {String} type
- * @param {String} abbr
- * @param {String} value
- */
-function addUserResource(syntax, type, abbr, value) {
-	var res = require('resources');
-	var voc = res.getVocabulary('user') || {};
-	if (!(syntax in voc))
-		voc[syntax] = {};
-		
-	if (!(type in voc[syntax]))
-		voc[syntax][type] = {};
-		
-	voc[syntax][type][abbr] = value;
-	
-	res.setVocabulary(voc, 'user');
-}
-
-function hasZenCodingVariable(name) {
-	return !!require('resources').getVariable(name);
-}
-
 function tryBoolean(val) {
 	var strVal = String(val || '').toLowerCase();
 	if (strVal == 'true')
@@ -67,32 +35,6 @@ function tryBoolean(val) {
 		return intVal;
 	
 	return strVal;
-}
-
-function setupOutputProfile(name, profileObj) {
-	var map = {
-		tag_case: 'getTagCase',
-		attr_case: 'getAttrCase',
-		attr_quotes: 'getAttrQuotes',
-		tag_nl: 'getTagNewline',
-		place_cursor: 'isPlaceCaret',
-		indent: 'isIndentTags',
-		inline_break: 'getInlineBreak',
-		self_closing_tag: 'getSelfClosing',
-		filters: 'getFilters'
-	};
-	
-	var profile = {};
-	
-	_.each(map, function(p, k) {
-		profile[k] = tryBoolean(profileObj[p]());
-	});
-		
-	require('profile').create(String(name), profile);
-}
-
-function addUserVariable(name, value) {
-	require('resources').setVariable(name, value);
 }
 
 function previewWrapWithAbbreviation(editor, abbr) {
@@ -134,22 +76,78 @@ function strToJSON(data) {
 	}
 }
 
-function javaLoadUserSnippets(settingsData, userDefaults) {
-	settingsData = strToJSON(settingsData);
-	userDefaults = strToJSON(userDefaults);
-	var data = require('utils').deepMerge({}, settingsData, userDefaults);
-	require('resources').setVocabulary(data, 'user');
-}
-
-function javaLoadUserPreferences(data) {
-	if (data)
-		require('preferences').load(strToJSON(data));
-}
-
 function javaLoadSystemSnippets(data) {
 	if (data) {
 		require('resources').setVocabulary(strToJSON(data), 'system');
 	}
+}
+
+function javaLoadUserData(payload) {
+	payload = strToJSON(payload);
+	var profileMap = {
+		'tagCase': 'tag_case',
+		'attrCase': 'attr_case',
+		'attrQuotes': 'attr_quotes',
+		'tagNewline': 'tag_nl',
+		'placeCaret': 'place_cursor',
+		'indentTags': 'indent',
+		'inlineBreak': 'inline_break',
+		'selfClosing': 'self_closing_tag',
+		'filters': 'filters'
+	};
+
+	var validPayload = {};
+
+	// prepare profiles
+	if ('profiles' in payload) {
+		validPayload.syntaxProfiles = {};
+		_.each(payload.profiles, function(profile, syntax) {
+			var p = {};
+			_.each(profile, function(v, k) {
+				p[profileMap[k]] = v;
+			});
+
+			validPayload.syntaxProfiles[syntax] = p;
+		});
+	}
+
+	// prepare snippets
+	var snippets = {};
+	var addSnippets = function(data, type) {
+		if (!data) 
+			return;
+
+		_.each(data, function(item) {
+			if (!(item[0] in snippets)) {
+				snippets[item[0]] = {};
+			}
+
+			var syntaxCtx = snippets[item[0]];
+			if (!syntaxCtx[type]) {
+				syntaxCtx[type] = {};
+			}
+
+			syntaxCtx[type][item[1]] = item[2];
+		});
+	};
+
+	addSnippets(payload.snippets, 'snippets');
+	addSnippets(payload.abbreviations, 'abbreviations');
+	validPayload.snippets = snippets;
+
+	// prepare variables
+	if ('variables' in payload) {
+		validPayload.variables = {};
+		_.each(payload.variables, function(item) {
+			validPayload.variables[item[1]] = item[2];
+		});
+	}
+
+	require('bootstrap').loadUserData(validPayload);
+}
+
+function javaLoadExtensions(payload) {
+	require('bootstrap').loadExtensions(strToJSON(payload));
 }
 
 function javaExtractTabstops(text) {

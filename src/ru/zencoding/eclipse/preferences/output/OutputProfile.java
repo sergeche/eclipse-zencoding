@@ -1,5 +1,7 @@
 package ru.zencoding.eclipse.preferences.output;
 
+import java.util.HashMap;
+
 import org.eclipse.jface.preference.IPreferenceStore;
 
 import ru.zencoding.eclipse.EclipseZenCodingPlugin;
@@ -16,6 +18,8 @@ public class OutputProfile {
 	public static final String FALSE = "false";
 	public static final String DECIDE = "decide";
 	public static final String XHTML_STYLE = "xhtml";
+	
+	public static String[] syntaxes = {"html", "xml", "xsl", "css", "haml"};
 
 	private String tagCase = LOWERCASE;
 	private String attrCase = LOWERCASE;
@@ -47,6 +51,15 @@ public class OutputProfile {
 		profile.setFilters(store.getString(getPrefName(PreferenceConstants.P_FILTERS, suffix)));
 		
 		return profile;
+	}
+	
+	public static HashMap<String,OutputProfile> allProfiles() {
+		HashMap<String, OutputProfile> profiles = new HashMap<String, OutputProfile>();
+		for (String syntax : syntaxes) {
+			profiles.put(syntax, createFromPreferences(syntax));
+		}
+		
+		return profiles;
 	}
 
 	private static String getPrefName(String prefix, String suffix) {

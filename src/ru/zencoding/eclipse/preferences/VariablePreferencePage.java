@@ -124,7 +124,7 @@ public abstract class VariablePreferencePage extends PreferencePage implements
 			boolean valid= fNameText == null || fNameText.getText().trim().length() != 0;
 			if (!valid) {
 				StatusInfo status = new StatusInfo();
-				status.setError("You have to provide variable name");
+				status.setError("You must provide variable name");
 				updateButtonsEnableState(status);
 	 		}
 		}
