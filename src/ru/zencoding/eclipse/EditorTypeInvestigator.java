@@ -37,7 +37,8 @@ public class EditorTypeInvestigator {
 		String result = null;
 		
 		IDocument doc = editor.getDocument();
-		String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor().toString().toLowerCase();
+		String className = PlatformUI.getWorkbench().getActiveWorkbenchWindow()
+				.getActivePage().getActiveEditor().getSite().getId().toLowerCase();
 		
 		// try to get current partition (true Eclipse)
 		try {
@@ -82,6 +83,7 @@ public class EditorTypeInvestigator {
 	}
 
 	private static String guessSyntaxFromString(String str) {
+//		System.out.println("Guess syntax from " + str);
 		if (str.indexOf("xsl") != -1)
 			return TYPE_XSL;
 		else if (str.indexOf("xml") != -1)
@@ -91,6 +93,8 @@ public class EditorTypeInvestigator {
 		else if (str.indexOf("sass") != -1)
 			return TYPE_CSS;
 		else if (str.indexOf("css") != -1)
+			return TYPE_CSS;
+		else if (str.indexOf(".less.") != -1)
 			return TYPE_CSS;
 		else if (str.indexOf("html") != -1)
 			return TYPE_HTML;
