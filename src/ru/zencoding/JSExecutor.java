@@ -16,7 +16,7 @@ public class JSExecutor {
 	
 	
 	private static String[] coreFiles = {
-		"zencoding-app.js",
+		"emmet-app.js",
 //		"json2.js",
 		"file-interface.js",
 		"java-wrapper.js"
