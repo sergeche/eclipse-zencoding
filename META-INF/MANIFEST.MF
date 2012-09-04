@@ -1,9 +1,9 @@
 Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
-Bundle-Name: Zen Coding for Eclipse
-Bundle-SymbolicName: ru.zencoding.eclipse; singleton:=true
-Bundle-Version: 0.8.0.qualifier
-Bundle-Activator: ru.zencoding.eclipse.EclipseZenCodingPlugin
+Bundle-Name: Emmet for Eclipse
+Bundle-SymbolicName: io.emmet.eclipse;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Bundle-Activator: io.emmet.eclipse.EclipseEmmetPlugin
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
  org.eclipse.ui.editors;bundle-version="3.5.0",
@@ -22,8 +22,8 @@ Import-Package: org.eclipse.core.filesystem,
  org.eclipse.ui.part,
  org.eclipse.ui.texteditor,
  org.eclipse.ui.texteditor.templates
-Export-Package: ru.zencoding,
- ru.zencoding.eclipse,
- ru.zencoding.eclipse.handlers,
- ru.zencoding.eclipse.preferences,
- ru.zencoding.eclipse.preferences.output
+Export-Package: io.emmet,
+ io.emmet.eclipse,
+ io.emmet.eclipse.handlers,
+ io.emmet.eclipse.preferences,
+ io.emmet.eclipse.preferences.output
